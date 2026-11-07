@@ -46,6 +46,9 @@ func cmdSetup(args []string, logger *slog.Logger) {
 	}); err != nil {
 		fail(err.Error())
 	}
+	if err := worker.PersistOllamaKV(); err != nil {
+		logf("квантование KV-кэша не записано: " + err.Error())
+	}
 	if dir, err := worker.EnsureLlama(ctx, worker.EnsureLlamaOptions{Log: logf, Progress: progress}); err != nil {
 		fail("llama.cpp: " + err.Error())
 	} else {

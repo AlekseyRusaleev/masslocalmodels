@@ -245,6 +245,33 @@ func CurrentMeshPlan() (ResolvedMesh, bool) {
 	return meshPlan.plan, meshPlan.set
 }
 
+// draftSpecArgs выбирает черновик для llama-server.
+//
+// Файл головы модели включает её тип. Без файла остаётся ngram-mod: он не
+// привязан к модели и не требует второй видеокарты.
+func draftSpecArgs(draftPath, spec string) []string {
+	if draftPath != "" {
+		if _, err := os.Stat(draftPath); err == nil {
+			if spec == "" {
+				spec = DefaultDraftSpec
+			}
+			return []string{"-md", draftPath, "--spec-type", spec}
+		}
+	}
+	return []string{"--spec-type", SpecNgram}
+}
+
+// ClearMeshPlan забывает план участия.
+//
+// Нужен, когда этот компьютер сам сообщил, что модель помещается на его карту:
+// он больше не стадия и отвечает целиком.
+func ClearMeshPlan() {
+	meshPlan.Lock()
+	defer meshPlan.Unlock()
+	meshPlan.plan = ResolvedMesh{}
+	meshPlan.set = false
+}
+
 // RefreshMeshPlan спрашивает платформу, в какой шард-группе состоит узел.
 //
 // Возвращает план, если узел входит в активную топологию. Ошибка означает, что
@@ -816,15 +843,11 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 		if m.NCPUMoE > 0 {
 			args = append(args, "--n-cpu-moe", fmt.Sprint(m.NCPUMoE))
 		}
-		if m.DraftGGUFPath != "" {
-			if _, err := os.Stat(m.DraftGGUFPath); err == nil {
-				spec := m.SpecType
-				if spec == "" {
-					spec = DefaultDraftSpec
-				}
-				args = append(args, "-md", m.DraftGGUFPath, "--spec-type", spec)
-			}
-		}
+		// Кэш квантуется на процессе, который собирает ответ: слои этой
+		// стадии остаются на карте. Черновик ngram-mod проверяется здесь же,
+		// одной пачкой. Голова модели подключается только если её файл есть.
+		args = append(args, kvCacheArgs(largestVRAM())...)
+		args = append(args, draftSpecArgs(m.DraftGGUFPath, m.SpecType)...)
 	default:
 		return nil, fmt.Errorf("mesh: unknown role %q", m.Role)
 	}

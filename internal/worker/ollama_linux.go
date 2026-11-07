@@ -53,3 +53,25 @@ func runOllamaSetup(setup string) error {
 	}
 	return nil
 }
+
+// PersistOllamaKV записывает квантование кэша в службу Ollama.
+//
+// Переменные остаются после перезагрузки. Уже заданное человеком значение
+// здесь не читается: файл службы — то, что подхватит следующий запуск.
+func PersistOllamaKV() error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	dir := "/etc/systemd/system/ollama.service.d"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	kind := kvCacheType(largestVRAM())
+	body := "[Service]\nEnvironment=OLLAMA_KV_CACHE_TYPE=" + kind + "\nEnvironment=OLLAMA_FLASH_ATTENTION=1\n"
+	if err := os.WriteFile(filepath.Join(dir, "kv-cache.conf"), []byte(body), 0o644); err != nil {
+		return err
+	}
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "try-restart", "ollama").Run()
+	return nil
+}

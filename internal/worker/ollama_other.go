@@ -14,6 +14,7 @@ func OllamaExecutable() string {
 
 func startOllama(exe string) error {
 	cmd := exec.Command(exe, "serve")
+	cmd.Env = ollamaServeEnv()
 	if err := cmd.Start(); err != nil {
 		return err
 	}

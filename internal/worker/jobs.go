@@ -665,8 +665,9 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 		cfg = prepareAutomaticMesh(cfg)
 
 		// Узел-стадия держит RPC-сервер поднятым: координатор подключается к
-		// нему при загрузке слоёв, а не когда захочет стадия.
-		if mesh := MeshOptionsOf(cfg); mesh != nil {
+		// нему при загрузке слоёв, а не когда захочет стадия. Компьютер,
+		// который сам сообщил, что модель помещается на карту, стадией не становится.
+		if mesh := MeshOptionsOf(cfg); mesh != nil && !wholeModelFits(model) {
 			if stage, stageErr := MeshForStage(cfg); stageErr == nil {
 				if _, err := EnsureMeshRuntime(ctx, client, stage, log); err != nil {
 					log.Warn("cannot start shard stage", "err", err)
@@ -701,6 +702,8 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 		switch {
 		case job.Kind == "embedding":
 			result = RunEmbedJob(ctx, client, job, model, log)
+		case wholeModelFits(model):
+			result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
 		case mesh != nil && mesh.Role == meshRoleAuto:
 			// Группы ещё нет — отвечаем моделью целиком. Когда платформа
 			// назначит этого узла координатором, чат пойдёт через слои.

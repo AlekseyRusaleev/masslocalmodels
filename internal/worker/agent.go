@@ -18,7 +18,7 @@ import (
 
 // AgentVersion — версия агента, отправляется при регистрации и в heartbeat.
 // Её же программа сравнивает с release.json на платформе.
-const AgentVersion = "0.3.5"
+const AgentVersion = "0.3.6"
 
 // ActiveJobs — сколько заданий узел выполняет прямо сейчас.
 // Значение уходит в heartbeat, чтобы панель показывала реальную загрузку.
@@ -232,6 +232,16 @@ func Run(ctx context.Context, cfgPath string, once bool, log *slog.Logger) error
 		}
 		if IsRetiredModel(served) {
 			served = ""
+		}
+		// Исключение, а не обычный путь: карта этого компьютера вмещает файл
+		// и кэш. Группа остальных узлов от этого сообщения не распускается.
+		if cfg.Model != "" && wholeModelFits(cfg.Model) {
+			meta["model_fits"] = true
+			served = cfg.Model
+			if _, planned := CurrentMeshPlan(); planned {
+				ClearMeshPlan()
+				StopMeshRuntime()
+			}
 		}
 		meta["served_model"] = served
 		if held := HeldPieceNames(workercfg.DefaultModelDir()); len(held) > 0 {

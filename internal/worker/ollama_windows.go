@@ -35,7 +35,9 @@ func OllamaExecutable() string {
 }
 
 func startOllama(exe string) error {
+	persistWindowsKVEnv()
 	cmd := exec.Command(exe, "serve")
+	cmd.Env = ollamaServeEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
 		CreationFlags: createNoWindow,
@@ -45,6 +47,25 @@ func startOllama(exe string) error {
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+// persistWindowsKVEnv оставляет квантование кэша в переменных пользователя.
+//
+// Уже записанное значение не меняется. Служба Ollama подхватит его при
+// следующем своём запуске.
+func persistWindowsKVEnv() {
+	kind := kvCacheType(largestVRAM())
+	script := fmt.Sprintf(`
+if (-not [Environment]::GetEnvironmentVariable('OLLAMA_KV_CACHE_TYPE','User')) {
+  [Environment]::SetEnvironmentVariable('OLLAMA_KV_CACHE_TYPE','%s','User')
+}
+if (-not [Environment]::GetEnvironmentVariable('OLLAMA_FLASH_ATTENTION','User')) {
+  [Environment]::SetEnvironmentVariable('OLLAMA_FLASH_ATTENTION','1','User')
+}
+`, kind)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	_ = cmd.Run()
 }
 
 func downloadOllamaSetup(ctx context.Context, progress func(done, total int64)) (string, error) {

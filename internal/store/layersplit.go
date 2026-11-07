@@ -51,10 +51,10 @@ func SplitLayers(total, parts int) [][2]int {
 
 // EnsureLayerSplit держит автоматическую раскладку слоёв в актуальном виде.
 //
-// Два и больше узлов, которые сами сообщили, что умеют шард и держат эту
-// модель, получают непрерывные диапазоны. Один такой узел — ещё не сеть:
-// автоматическая группа снимается, и он отвечает моделью целиком. Ручная
-// топология не трогается.
+// Обычный путь — группа слоёв. Узел, который сам сообщил model_fits, в группу
+// не входит и считает свои запросы целиком. Остальные узлы от этого не
+// распускаются. Меньше двух участников группы снимает только автоматическую
+// раскладку. Ручная топология не трогается.
 func (s *Store) EnsureLayerSplit(ctx context.Context, model string) error {
 	layers := LayerCount(model)
 	if layers == 0 {
@@ -84,6 +84,7 @@ func (s *Store) EnsureLayerSplit(ctx context.Context, model string) error {
 		WHERE h.observed_at > now() - interval '2 minutes'
 		  AND w.state = 'available'
 		  AND h.meta_json->>'mesh_capable' = 'true'
+		  AND coalesce(h.meta_json->>'model_fits', '') <> 'true'
 		  AND lower(h.meta_json->>'mesh_model') = lower($1)
 		ORDER BY h.worker_id, h.observed_at DESC`, model)
 	if err != nil {

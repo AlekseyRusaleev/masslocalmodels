@@ -24,6 +24,9 @@ const (
 	DefaultDraftSHA256 = "6955f98a701e97a8c969f3ff33be8ba17b35bd60e5ac96258d2c42d710c7d63f"
 	DefaultDraftBytes  = 921488000
 	DefaultDraftSpec   = "draft-eagle3"
+	// SpecNgram ищет повтор в уже имеющемся тексте. Отдельной головы модели
+	// ему не нужно, поэтому он стоит на любой группе слоёв без черновика.
+	SpecNgram = "ngram-mod"
 )
 
 // ResolveChatModel выбирает имя модели для скачивания и харнеса.

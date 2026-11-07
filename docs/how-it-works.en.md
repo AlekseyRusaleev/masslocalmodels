@@ -1,6 +1,6 @@
 # How the system works
 
-**This describes what the code does now** (participant program 0.3.5, 7 November 2026).
+**This describes what the code does now** (participant program 0.3.6, 7 November 2026).
 [Русский](how-it-works.md).
 
 The original specification is [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](../DISTRIBUTED_AI_PLATFORM_PLAN.md).
@@ -25,7 +25,7 @@ on its own once two or more such computers are present.
 
 | | One computer | Layer group |
 |---|---|---|
-| When | Fewer than two computers have llama.cpp and the model file, or the group did not start | Two or more such computers are sending heartbeats |
+| When | Fewer than two computers have llama.cpp and the model file, the group did not start, or this computer itself reports that the file and cache fit on its card | Two or more such computers are sending heartbeats and do not report that the model fits on the card |
 | What computes | Ollama, every layer on that machine | llama.cpp: `llama-server` on the leader, `ggml-rpc-server` on the others |
 | What is on disk | The whole model file | The same whole file. It is not cut into pieces |
 
@@ -35,9 +35,9 @@ The platform splits only a model whose layer count it knows. Today that is `gpt-
 A group is formed like this:
 
 1. The computer turns layer mode on by itself when llama.cpp and the Ollama weight file are already on disk. The person does not enter a layout.
-2. The heartbeat reports `mesh_capable` and the model name.
-3. The control plane looks at nodes that were `available` in the last two minutes and named the same model.
-4. Fewer than two such nodes removes the automatic group. A hand-made topology is left alone.
+2. The heartbeat reports `mesh_capable` and the model name. If the model file and room for a quantized cache fit on its largest card, it also reports `model_fits`.
+3. The control plane looks at nodes that were `available` in the last two minutes, named the same model, and did not report `model_fits`.
+4. Fewer than two such nodes removes the automatic group. A hand-made topology is left alone. A `model_fits` node answers its own requests whole and does not dissolve the group of the others.
 5. Two or more nodes receive continuous ranges. The node with the lowest id leads (`coordinate`). The others only compute their range (`compute`). For 24 layers and two computers that is layers 0–11 and 12–23.
 
 A node that holds someone else's range **does not answer chat**. The leader claims the chat job.
@@ -90,6 +90,7 @@ llama.cpp RPC is what runs between computers:
 
 - the first time a group starts, the leader sends tensors to the stage once, and the stage caches them (`-c`);
 - later tokens carry activations, not the whole file;
+- on the computer that assembles the answer, the KV cache is quantized (`--cache-type-k` and `--cache-type-v`), and a batch of `ngram-mod` drafts is checked in one hop. A model that already has a head file uses that head instead of ngram. Whether the batch is faster on this link has not been measured, so no tokens-per-second figure is promised;
 - weights are not sent again for every answer while that cache is alive.
 
 Home upload measured on this link is about **1.4–1.5 MB/s**. That is the link, not a program setting.
