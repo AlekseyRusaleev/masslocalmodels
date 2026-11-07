@@ -1,5 +1,7 @@
 # ADR 0001 — Базовая архитектура платформы
 
+> Стек из этого ADR (NATS, S3, mTLS, vLLM, Petals) — решение на 2026-11-05, а не то, что работает. Как собрана система сейчас: [`../how-it-works.md`](../how-it-works.md).
+
 - **Статус:** accepted (базовые решения), часть деталей — pending
 - **Дата:** 2026-11-05
 - **Контекст:** [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](../../DISTRIBUTED_AI_PLATFORM_PLAN.md) — исходное ТЗ; [`../STATUS.md`](../STATUS.md) — состояние этапов; [`../operations/proxmox-inventory.md`](../operations/proxmox-inventory.md) — фактические ресурсы.
