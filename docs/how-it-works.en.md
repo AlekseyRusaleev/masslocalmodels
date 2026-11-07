@@ -1,6 +1,6 @@
 # How the system works
 
-**This describes what the code does now** (participant program 0.3.6, 7 November 2026).
+**This describes what the code does now** (participant program 0.3.7, 7 November 2026).
 [Русский](how-it-works.md).
 
 The original specification is [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](../DISTRIBUTED_AI_PLATFORM_PLAN.md).

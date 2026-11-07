@@ -183,6 +183,11 @@ func MeshNormalize(m workercfg.Mesh) workercfg.Mesh {
 	if m.SpecType == "" && m.DraftGGUFPath != "" {
 		m.SpecType = DefaultDraftSpec
 	}
+	// COMPUTE_SPEC_TYPE выбирает режим прогона: none, ngram-mod или draft-eagle3.
+	// Пустая переменная не меняет то, что уже записано в конфигурации.
+	if spec := strings.TrimSpace(os.Getenv("COMPUTE_SPEC_TYPE")); spec != "" {
+		m.SpecType = spec
+	}
 	return m
 }
 
@@ -247,18 +252,43 @@ func CurrentMeshPlan() (ResolvedMesh, bool) {
 
 // draftSpecArgs выбирает черновик для llama-server.
 //
-// Файл головы модели включает её тип. Без файла остаётся ngram-mod: он не
-// привязан к модели и не требует второй видеокарты.
-func draftSpecArgs(draftPath, spec string) []string {
-	if draftPath != "" {
-		if _, err := os.Stat(draftPath); err == nil {
-			if spec == "" {
-				spec = DefaultDraftSpec
-			}
-			return []string{"-md", draftPath, "--spec-type", spec}
+// none выключает черновик даже если файл головы лежит рядом. ngram-mod не
+// прикрепляет этот файл. draft-eagle3 требует, чтобы файл был на диске:
+// пропавшая голова не подменяется ngram. Пустой режим с файлом включает
+// голову, пустой режим без файла остаётся ngram.
+func draftSpecArgs(draftPath, spec string) ([]string, error) {
+	spec = strings.TrimSpace(spec)
+	switch spec {
+	case SpecNone:
+		return []string{"--spec-type", SpecNone}, nil
+	case SpecNgram:
+		return []string{"--spec-type", SpecNgram}, nil
+	case DefaultDraftSpec:
+		if err := draftFileReady(draftPath); err != nil {
+			return nil, err
 		}
+		return []string{"-md", draftPath, "--spec-type", DefaultDraftSpec}, nil
+	case "":
+		if strings.TrimSpace(draftPath) == "" {
+			return []string{"--spec-type", SpecNgram}, nil
+		}
+		if _, err := os.Stat(draftPath); err != nil {
+			return nil, fmt.Errorf("mesh: файл головы %s не найден", draftPath)
+		}
+		return []string{"-md", draftPath, "--spec-type", DefaultDraftSpec}, nil
+	default:
+		return nil, fmt.Errorf("mesh: неизвестный вид черновика %q", spec)
 	}
-	return []string{"--spec-type", SpecNgram}
+}
+
+func draftFileReady(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("mesh: для %s нужен файл головы", DefaultDraftSpec)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("mesh: файл головы %s не найден", path)
+	}
+	return nil
 }
 
 // ClearMeshPlan забывает план участия.
@@ -666,6 +696,7 @@ func meshConfigKey(m workercfg.Mesh) string {
 		m.Role, m.Model, m.GGUFPath, m.Layers, strings.Join(m.Peers, ","),
 		strings.Join(m.PeerWorkers, ","), m.TopologyID, m.SelfWorkerID,
 		fmt.Sprint(m.ServerPort, m.RPCPort, m.Ctx, m.Threads, m.ListenHost, m.Cache),
+		m.SpecType, m.DraftGGUFPath,
 	}, "|")
 }
 
@@ -847,7 +878,11 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 		// стадии остаются на карте. Черновик ngram-mod проверяется здесь же,
 		// одной пачкой. Голова модели подключается только если её файл есть.
 		args = append(args, kvCacheArgs(largestVRAM())...)
-		args = append(args, draftSpecArgs(m.DraftGGUFPath, m.SpecType)...)
+		specArgs, specErr := draftSpecArgs(m.DraftGGUFPath, m.SpecType)
+		if specErr != nil {
+			return nil, specErr
+		}
+		args = append(args, specArgs...)
 	default:
 		return nil, fmt.Errorf("mesh: unknown role %q", m.Role)
 	}
