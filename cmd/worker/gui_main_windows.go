@@ -775,12 +775,17 @@ func showTrayMenu(hwnd uintptr) {
 			uintptr(unsafe.Pointer(utf16Ptr("Состояние узла"))), 0x40)
 	case menuPause:
 		if setNodePaused(true) {
+			freed := worker.ReleaseLocalGPU()
 			state.mu.Lock()
 			if !state.busy {
-				state.status = "узел на паузе"
+				state.status = "узел на паузе, видеокарта свободна"
 			}
 			state.mu.Unlock()
-			state.log("пауза: новые задания не берутся")
+			if freed > 0 {
+				state.log("пауза: задания не берутся, модель снята с видеокарты")
+			} else {
+				state.log("пауза: новые задания не берутся")
+			}
 		}
 	case menuResume:
 		if setNodePaused(false) {
@@ -792,6 +797,8 @@ func showTrayMenu(hwnd uintptr) {
 			state.log("узел снова берёт задания")
 		}
 	case menuExit:
+		stopAgent()
+		worker.ReleaseLocalGPU()
 		ctxCancel()
 		procDestroyWindow.Call(hwnd)
 	}
@@ -964,19 +971,24 @@ func disconnectNode(hwnd uintptr) {
 	if cancel != nil {
 		cancel()
 	}
-	stopAgent()
 	cfgPath := defaultConfigPath()
 	if cfg, err := workercfg.Load(cfgPath); err == nil {
 		cfg.Paused = true
 		_ = workercfg.Save(cfgPath, cfg)
 	}
+	stopAgent()
+	freed := worker.ReleaseLocalGPU()
 	state.mu.Lock()
 	state.busy = false
 	state.finished = false
 	state.failed = false
-	state.status = "узел отключён"
+	state.status = "узел отключён, видеокарта свободна"
 	state.mu.Unlock()
-	state.log("узел отключён от сети")
+	if freed > 0 {
+		state.log("узел отключён от сети, модель снята с видеокарты")
+	} else {
+		state.log("узел отключён от сети")
+	}
 	enableControls(hwnd, true)
 }
 
@@ -1313,6 +1325,7 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		// новому окну. Иначе после обновления программа есть, но её не видно.
 		procAllowForeground.Call(^uintptr(0))
 		stopAgent()
+		worker.ReleaseLocalGPU()
 		ctxCancel()
 		procDestroyWindow.Call(hwnd)
 		return 0

@@ -625,6 +625,7 @@ func RunEmbedJob(ctx context.Context, client *Client, job *Job, defaultModel str
 func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logger) error {
 	backoff := time.Second
 	client := NewClient("", "")
+	wasPaused := false
 
 	for {
 		if ctx.Err() != nil {
@@ -640,12 +641,21 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 			continue
 		}
 		if cfg.Paused {
-			// Пауза: не забираем задания, но и процесс не завершаем.
+			// Пауза: задания не берём. Карту отпускаем сразу, иначе она
+			// остаётся занятой, пока человек хочет ей пользоваться.
+			if !wasPaused {
+				StopMeshRuntime()
+				if n := ReleaseLocalGPU(); n > 0 && log != nil {
+					log.Info("paused, graphics card released", "processes", n)
+				}
+				wasPaused = true
+			}
 			if !sleep(ctx, 3*time.Second) {
 				return nil
 			}
 			continue
 		}
+		wasPaused = false
 
 		if model == "" {
 			model = cfg.Model

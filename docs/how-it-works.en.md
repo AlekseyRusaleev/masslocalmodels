@@ -1,6 +1,6 @@
 # How the system works
 
-**This describes what the code does now** (participant program 0.3.4, 7 November 2026).
+**This describes what the code does now** (participant program 0.3.5, 7 November 2026).
 [Русский](how-it-works.md).
 
 The original specification is [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](../DISTRIBUTED_AI_PLATFORM_PLAN.md).
@@ -70,7 +70,8 @@ only on `127.0.0.1` and leaves through a tunnel the node opens.
 If the model is already loaded in Ollama, the program **answers with it immediately**. It must not
 unload that copy before the answer: the answer is ready, and a second copy will not fit on the same
 card. After a successful answer the program stops the llama-server that belongs to Ollama and frees
-the card. The next message can go through the layer group.
+the card. The next message can go through the layer group. Disconnect, pause, and exit do the
+same thing at once, so the card is free to use. A llama-server started outside this program is left running.
 
 If the group does not start because of memory or the runtime, Ollama answers instead of returning
 that error. An error that says the prompt does not fit the context window is not replaced this way.
@@ -138,6 +139,6 @@ The computer that computes the request does see that text. Otherwise it could no
 - installs Ollama when it is missing;
 - installs llama.cpp b12167 when `llama-server` and `ggml-rpc-server` are not already on disk;
 - updates its own exe and shows the window again after a silent update;
-- frees the graphics card after an answer, as described above.
+- frees the graphics card after an answer, and also on Disconnect, pause, and exit.
 
 A person does not lay out layers by hand and does not have to unload the model before the next message.

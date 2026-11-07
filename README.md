@@ -27,7 +27,7 @@ The control plane receives the request, chooses the computers, and returns the t
 
 Each computer downloads the whole model file itself. The first time a group starts, the leader sends tensors once, the stage caches them, and later tokens carry activations. The weights are not sent again for every following answer.
 
-If the model is already in memory, it answers immediately. After the answer the program frees the graphics card itself. If the layer group does not start, the local model still answers.
+If the model is already in memory, it answers immediately. After the answer, and also when Disconnect is clicked, the program frees the graphics card itself. If the layer group does not start, the local model still answers.
 
 The Windows program installs what it needs: Ollama for a whole model, and `llama-server` plus `ggml-rpc-server` from llama.cpp build b12167 when those files are not already on the disk.
 

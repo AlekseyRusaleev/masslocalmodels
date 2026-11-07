@@ -27,6 +27,8 @@ func startOllama(exe string) error {
 
 func stopOllamaModelServers() int { return 0 }
 
+func ReleaseLocalGPU() int { return 0 }
+
 func downloadOllamaSetup(context.Context, func(done, total int64)) (string, error) {
 	return "", fmt.Errorf("скачивание установщика Ollama есть только в Windows-программе")
 }

@@ -93,3 +93,28 @@ func stopOllamaModelServers() int {
 	}
 	return n
 }
+
+// ReleaseLocalGPU снимает с видеокарты модель, которую держит эта программа:
+// llama-server Ollama и процессы группы слоёв из нашей сборки llama.cpp.
+// Возвращает, сколько процессов остановлено.
+func ReleaseLocalGPU() int {
+	cmd := quiet(exec.Command("powershell.exe", "-NoProfile", "-Command",
+		`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath } | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.ExecutablePath }`))
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		pid, path, ok := strings.Cut(line, "|")
+		if !ok || !holdsGPU(path) {
+			continue
+		}
+		kill := quiet(exec.Command("taskkill.exe", "/PID", pid, "/F"))
+		if kill.Run() == nil {
+			n++
+		}
+	}
+	return n
+}
