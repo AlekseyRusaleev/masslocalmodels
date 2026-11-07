@@ -1,0 +1,8 @@
+{
+  "model": "qwen3:8b",
+  "stream": false,
+  "messages": [
+    { "role": "user", "content": "Перечисли десять коротких правил распределённых систем, по одному предложению каждое." }
+  ],
+  "options": { "num_ctx": 2048, "num_predict": 300, "temperature": 0.2 }
+}

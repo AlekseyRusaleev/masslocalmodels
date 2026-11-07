@@ -1,0 +1,43 @@
+[Unit]
+Description=Distributed AI Platform — API Gateway (Control Plane)
+Documentation=file:///opt/compute-control/README.md
+After=network-online.target postgresql.service nats-server.service
+Wants=network-online.target postgresql.service nats-server.service
+
+[Service]
+Type=exec
+User=control
+Group=control
+EnvironmentFile=/etc/compute-control/api-gateway.env
+ExecStart=/opt/compute-control/bin/api-gateway
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=20s
+
+# Ограничения: процесс не должен уметь ничего, кроме своей работы.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

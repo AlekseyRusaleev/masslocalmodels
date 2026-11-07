@@ -1,0 +1,989 @@
+/* Токены интерфейса: тёмная приборная панель.
+   Правила — docs/ui-guidelines.md (методика unslop).
+   Сетка 4 px, одна нейтральная шкала с холодным оттенком, три роли текста,
+   один accent, волосяные границы, табличные цифры. */
+
+:root {
+  color-scheme: dark;
+
+  /* нейтральная шкала */
+  --bg: #0c0e10;
+  --surface-1: #12161a;
+  --surface-2: #181d22;
+  --surface-3: #1f252b;
+  --hairline: rgba(255, 255, 255, 0.07);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+
+  /* три роли текста */
+  --text-1: #e7eaed;
+  --text-2: #98a1a9;
+  --text-3: #6b747c;
+
+  /* один accent: бирюза приборной панели */
+  --accent: #63b6a4;
+  --accent-quiet: rgba(99, 182, 164, 0.14);
+
+  /* статусы: приглушены, чтобы жить в палитре */
+  --state-ok: #58a06b;
+  --state-warn: #b0863c;
+  --state-bad: #b05a52;
+  --state-idle: #6b747c;
+
+  /* радиусы: вложенный = внешний − отступ, минимум 4 */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+
+  /* отступы: шаг 4 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* типографика */
+  --font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+
+  --duration-fast: 120ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--space-1);
+}
+
+/* ---------- каркас ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-4);
+  border-right: 1px solid var(--hairline);
+  background: var(--surface-1);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.brand-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.brand-name {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.brand-note {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-label {
+  padding: var(--space-2);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 34px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  transition: color var(--duration-fast) var(--ease), background-color var(--duration-fast) var(--ease);
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-item:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.nav-item[aria-current="page"] {
+  color: var(--text-1);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+
+.nav-item:disabled {
+  color: var(--text-3);
+  cursor: default;
+  background: transparent;
+}
+
+.nav-item-text {
+  flex: 1;
+}
+
+.nav-item-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 0 var(--space-2);
+  color: var(--text-3);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.content {
+  min-width: 0;
+  padding: var(--space-8) var(--space-8) var(--space-10);
+}
+
+.content-inner {
+  max-width: 1560px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* ---------- заголовки ---------- */
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.page-subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* ---------- кнопки ---------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease), border-color var(--duration-fast) var(--ease);
+}
+
+.button:hover {
+  background: var(--surface-3);
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.button[data-variant="primary"] {
+  background: var(--text-1);
+  border-color: var(--text-1);
+  color: var(--bg);
+}
+
+.button[data-variant="primary"]:hover {
+  background: #f2f4f6;
+}
+
+.button[data-variant="quiet"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+.button[data-variant="quiet"]:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- панели и таблицы ---------- */
+
+.panel {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-panel);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead th {
+  padding: var(--space-2) var(--space-5);
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+.secondary {
+  color: var(--text-2);
+}
+
+/* статус: точка + текст, без пилюль и свечения */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--state-idle);
+}
+
+.state[data-state="available"] .state-dot {
+  background: var(--state-ok);
+}
+
+.state[data-state="paused"] .state-dot,
+.state[data-state="drain"] .state-dot {
+  background: var(--state-warn);
+}
+
+.state[data-state="quarantined"] .state-dot {
+  background: var(--state-bad);
+}
+
+.state[data-state="maintenance"] .state-dot,
+.state[data-state="offline"] .state-dot {
+  background: var(--state-idle);
+}
+
+/* ---------- пустые состояния и ошибки ---------- */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-5);
+  text-align: left;
+  max-width: 560px;
+}
+
+.notice-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.notice-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.notice-error .notice-title {
+  color: var(--state-bad);
+}
+
+/* ---------- форма ключа ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 560px;
+}
+
+.field label {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.field input {
+  height: 34px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.field-note {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+/* ---------- статистика ---------- */
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.stat {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-1);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.stat-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.stat-note {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* ---------- чат ---------- */
+
+.chat-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-5);
+}
+
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.select-field select {
+  height: 32px;
+  min-width: 180px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 60vh;
+}
+
+/* Чат разделён на список диалогов и сам разговор: история должна быть видна,
+   а не спрятана в выпадающем списке. */
+.chat-split {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.chat-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-right: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.chat-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: min(62vh, 720px);
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+
+.history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--radius-control);
+}
+
+.history-item[data-active="true"] {
+  background: var(--surface-2);
+}
+
+.history-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: inherit;
+  cursor: pointer;
+}
+
+.history-open:hover {
+  background: var(--surface-3);
+}
+
+.history-title {
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.history-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.history-item:hover .history-delete,
+.history-item[data-active="true"] .history-delete {
+  opacity: 1;
+}
+
+.history-delete:hover {
+  color: var(--text-1);
+  background: var(--surface-3);
+}
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-5);
+  overflow-y: auto;
+  max-height: min(62vh, 720px);
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+
+.chat-empty {
+  margin: auto;
+  max-width: 420px;
+  text-align: left;
+}
+
+.chat-empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.chat-empty-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 760px;
+}
+
+.turn[data-role="user"] {
+  align-self: flex-end;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+}
+
+.turn-role {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.turn-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.turn-meta {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.turn-error {
+  color: var(--state-bad);
+  font-size: 13px;
+}
+
+.reasoning {
+  border-left: 1px solid var(--hairline-strong);
+  padding-left: var(--space-3);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.reasoning summary {
+  cursor: pointer;
+  color: var(--text-3);
+  list-style: none;
+}
+
+.reasoning summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning summary::before {
+  content: "+ ";
+}
+
+.reasoning[open] summary::before {
+  content: "− ";
+}
+
+.reasoning-body {
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* курсор генерации: одна яркая деталь экрана */
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  background: var(--accent);
+  vertical-align: -2px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+.caret-inline {
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
+.composer {
+  border-top: 1px solid var(--hairline);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--surface-1);
+}
+
+.composer-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  padding: var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.composer-input::placeholder {
+  color: var(--text-3);
+}
+
+.composer-input:disabled {
+  opacity: 0.6;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.composer-hint {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* ---------- карточки моделей и таблицы ---------- */
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.model-card {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.model-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--text-3);
+}
+
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.row-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.error-text {
+  color: var(--state-bad);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.toggle input {
+  accent-color: var(--accent);
+}
+
+/* ---------- подключение узла ---------- */
+
+.connect-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+.connect-form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.field-inline input {
+  height: 32px;
+  min-width: 240px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.connect-token,
+.connect-command {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.connect-token code {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.connect-command pre {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Вход в панель: одна карточка по центру, без фона и украшений. */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-3);
+}
+
+.login-card .brand {
+  margin-bottom: var(--space-1);
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    overflow-x: auto;
+  }
+
+  .nav {
+    flex-direction: row;
+    gap: var(--space-1);
+  }
+
+  .nav-label,
+  .sidebar-foot {
+    display: none;
+  }
+
+  .content {
+    padding: var(--space-5) var(--space-4) var(--space-8);
+  }
+
+  /* На узком экране история уезжает наверх и показывает пару последних
+     диалогов, а не отнимает половину высоты у разговора. */
+  .chat-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-history {
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .history-list {
+    max-height: 140px;
+  }
+}

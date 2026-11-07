@@ -1,0 +1,27 @@
+# Сборки и зависимости. В репозиторий они не входят: программа собирается из исходников.
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.part
+
+web/node_modules/
+web/dist/
+
+**/__pycache__/
+*.pyc
+
+# Секреты и локальные настройки узла.
+.env
+.env.*
+*.pem
+*.key
+agent.json
+**/credentials.yaml
+**/.credentials.yaml
+
+# Адреса рабочих серверов и домашнего узла. Это не код.
+docs/operations/vps-inventory.md
+docs/operations/proxmox-inventory.md
+docs/operations/relocation-runbook.md
