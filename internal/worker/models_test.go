@@ -17,6 +17,24 @@ func TestResolveChatModel(t *testing.T) {
 	}
 }
 
+func TestModelNamesMatchTag(t *testing.T) {
+	if !modelNamesMatch("gpt-oss:20b:latest", "gpt-oss:20b") {
+		t.Fatal("тег latest должен совпасть с именем без тега")
+	}
+	if modelNamesMatch("qwen3:8b", "gpt-oss:20b") {
+		t.Fatal("разные модели совпали")
+	}
+}
+
+func TestMeshFallsBackWhenTheCardIsBusy(t *testing.T) {
+	if !meshCanFallBack("shard group unavailable: insufficient GPU memory") {
+		t.Fatal("занятая карта должна привести к ответу локальной моделью")
+	}
+	if meshCanFallBack("prompt does not fit the shard-group context window: at least 9 tokens against 4") {
+		t.Fatal("длинный промпт нельзя тихо перекладывать")
+	}
+}
+
 func TestEnsureOllamaDeclinedWhenMissing(t *testing.T) {
 	if OllamaReady(context.Background()) || OllamaExecutable() != "" {
 		t.Skip("на этой машине Ollama уже есть")

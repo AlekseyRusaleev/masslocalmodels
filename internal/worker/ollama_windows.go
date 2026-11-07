@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/private-compute/network/internal/download"
@@ -72,4 +73,23 @@ func runOllamaSetup(setup string) error {
 		return fmt.Errorf("%w: %s", err, text)
 	}
 	return nil
+}
+
+// stopOllamaModelServers останавливает llama-server, который Ollama держит
+// ради уже загруженной модели. Пока этот процесс жив, запрос на выгрузку
+// часто не возвращается, и карта так и остаётся занятой.
+func stopOllamaModelServers() int {
+	cmd := quiet(exec.Command("powershell.exe", "-NoProfile", "-Command",
+		`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like '*\Ollama\lib\ollama\llama-server*.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }`))
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }

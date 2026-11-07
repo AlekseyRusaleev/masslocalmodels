@@ -703,7 +703,24 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
 				break
 			}
+			// Модель уже в памяти и может ответить. Снимать её до ответа
+			// нельзя: прошлый раз из-за этого запрос оборвался, хотя ответ
+			// был готов. После ответа карта освобождается сама, и следующее
+			// сообщение идёт через группу слоёв.
+			if ollamaHasModel(ctx, model) {
+				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
+				if result.Error == "" {
+					if stopped := stopOllamaModelServers(); stopped > 0 {
+						log.Info("local model stopped after the answer, next request uses the layer group", "processes", stopped)
+					}
+				}
+				break
+			}
 			result = RunMeshChatJob(ctx, client, job, stage, cfg.NumCtx, log)
+			if result.Error != "" && meshCanFallBack(result.Error) {
+				log.Warn("shard group did not start, answering with the local model", "err", result.Error)
+				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
+			}
 		case mesh != nil:
 			stage, err := MeshForJob(cfg)
 			if err != nil {
@@ -723,4 +740,16 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 			log.Warn("job failed", "job", job.ID, "err", result.Error)
 		}
 	}
+}
+
+// meshCanFallBack — группа слоёв не стартовала, но локальная модель может ответить.
+// Ошибка размера промпта сюда не входит: её повтор через Ollama ничего не исправит.
+func meshCanFallBack(err string) bool {
+	text := strings.ToLower(err)
+	if strings.Contains(text, "context window") {
+		return false
+	}
+	return strings.Contains(text, "insufficient") ||
+		strings.Contains(text, "shard group unavailable") ||
+		strings.Contains(text, "shard runtime")
 }

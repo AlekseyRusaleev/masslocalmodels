@@ -311,6 +311,54 @@ func LoadedModel(ctx context.Context, wanted string) (name, digest string) {
 	return "", ""
 }
 
+// ollamaHasModel сообщает, что эта модель уже загружена и может ответить сразу.
+// Короткий срок: если рантайм завис, держа карту, ждать его бесполезно.
+func ollamaHasModel(ctx context.Context, want string) bool {
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, OllamaEndpoint+"/api/ps", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return false
+	}
+	var loaded struct {
+		Models []struct {
+			Name  string `json:"name"`
+			Model string `json:"model"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&loaded); err != nil {
+		return false
+	}
+	for _, model := range loaded.Models {
+		name := model.Name
+		if name == "" {
+			name = model.Model
+		}
+		if modelNamesMatch(name, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// modelNamesMatch считает gpt-oss:20b и gpt-oss:20b:latest одной моделью.
+func modelNamesMatch(got, want string) bool {
+	got = strings.ToLower(strings.TrimSpace(got))
+	want = strings.ToLower(strings.TrimSpace(want))
+	if got == "" || want == "" {
+		return false
+	}
+	return got == want || strings.HasPrefix(got, want+":") || strings.HasPrefix(want, got+":")
+}
+
 // UnloadOllamaModels выгружает модели из памяти рантайма Ollama.
 //
 // Зачем: перед стартом шард-группы на той же машине нельзя держать в памяти

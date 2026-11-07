@@ -514,14 +514,29 @@ func ensureMeshMemory(ctx context.Context, ggufPath string, log *slog.Logger) er
 		return nil
 	}
 
-	if unloaded, unloadErr := UnloadOllamaModels(ctx); unloadErr != nil {
+	unloadCtx, unloadCancel := context.WithTimeout(ctx, 3*time.Second)
+	unloaded, unloadErr := UnloadOllamaModels(unloadCtx)
+	unloadCancel()
+	if unloadErr != nil {
 		log.Warn("mesh: cannot unload runtime models", "err", unloadErr)
 	} else if len(unloaded) > 0 {
 		log.Info("mesh: runtime models unloaded to free memory", "models", unloaded)
+	}
+	if retry, retryErr := PlanMeshMemory(ctx, ggufPath); retryErr == nil {
+		if retry.OK {
+			log.Info("mesh memory check passed after unload",
+				"need_ram_mb", retry.NeededBytes>>20, "free_ram_mb", retry.FreePhysBytes>>20,
+				"need_vram_mb", retry.NeededVRAMBytes>>20, "free_vram_mb", retry.FreeVRAMBytes>>20)
+			return nil
+		}
+		plan = retry
+	}
+	if stopped := stopOllamaModelServers(); stopped > 0 {
+		log.Info("mesh: stopped local model servers to free the card", "processes", stopped)
+		time.Sleep(1500 * time.Millisecond)
 		if retry, retryErr := PlanMeshMemory(ctx, ggufPath); retryErr == nil {
 			if retry.OK {
-				log.Info("mesh memory check passed after unload",
-					"need_ram_mb", retry.NeededBytes>>20, "free_ram_mb", retry.FreePhysBytes>>20,
+				log.Info("mesh memory check passed after stopping local servers",
 					"need_vram_mb", retry.NeededVRAMBytes>>20, "free_vram_mb", retry.FreeVRAMBytes>>20)
 				return nil
 			}
