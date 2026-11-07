@@ -31,10 +31,9 @@ while ((Get-Process -Id $target -ErrorAction SilentlyContinue) -and ((Get-Date) 
 if (Get-Process -Id $target -ErrorAction SilentlyContinue) { exit 1 }
 Start-Sleep -Milliseconds 400
 Move-Item -LiteralPath %s -Destination %s -Force
-$proc = Start-Process -FilePath %s -WindowStyle Normal -PassThru
-Start-Sleep -Milliseconds 800
-$shell = New-Object -ComObject WScript.Shell
-[void]$shell.AppActivate($proc.Id)
+# Запуск через оболочку: у скрытого powershell нет права вывести окно вперёд.
+$app = New-Object -ComObject Shell.Application
+$app.ShellExecute(%s, '', '', 'open', 1)
 `, os.Getpid(), psQuote(staged), psQuote(exe), psQuote(exe))
 	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
 		return fmt.Errorf("не удалось подготовить обновление: %w", err)

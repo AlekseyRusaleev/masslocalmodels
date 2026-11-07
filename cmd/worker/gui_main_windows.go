@@ -101,9 +101,14 @@ var (
 	procPostMessage        = user32.NewProc("PostMessageW")
 	procIsWindowVisible    = user32.NewProc("IsWindowVisible")
 	procSetForeground      = user32.NewProc("SetForegroundWindow")
+	procGetForeground      = user32.NewProc("GetForegroundWindow")
 	procSetWindowPos       = user32.NewProc("SetWindowPos")
 	procFlashWindowEx      = user32.NewProc("FlashWindowEx")
 	procAllowForeground    = user32.NewProc("AllowSetForegroundWindow")
+	procBringWindowToTop   = user32.NewProc("BringWindowToTop")
+	procGetWindowThread    = user32.NewProc("GetWindowThreadProcessId")
+	procAttachThreadInput  = user32.NewProc("AttachThreadInput")
+	procGetCurrentThreadId = kernel32.NewProc("GetCurrentThreadId")
 	procShellNotifyIcon    = shell32.NewProc("Shell_NotifyIconW")
 	procGetStockObject     = gdi32.NewProc("GetStockObject")
 	procSetBkMode          = gdi32.NewProc("SetBkMode")
@@ -1295,6 +1300,7 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case wmTimer:
+		revealAfterUpdate(hwnd)
 		refreshUI()
 		return 0
 
@@ -1332,6 +1338,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 }
 
 var (
+	revealTries int
+	revealDone  bool
+
 	updateMu    sync.Mutex
 	updateOffer worker.Release
 	updateKnown bool
@@ -1639,16 +1648,59 @@ func showMainWindow(hwnd uintptr) {
 		hwndTopMost    = ^uintptr(0) // (HWND)-1
 		hwndNotTopMost = ^uintptr(1) // (HWND)-2
 	)
-	// Первый ShowWindow подменяется командой запуска. Повторный вызов и
-	// короткое «поверх всех окон» вытаскивают программу даже после скрытого
-	// установщика обновления, которому Windows не даёт обычный передний план.
+	// Скрытый установщик обновления передаёт «не показывать». Первый
+	// ShowWindow Windows подменяет этой командой, поэтому показ повторяется.
 	procShowWindow.Call(hwnd, swShow)
 	procShowWindow.Call(hwnd, swShow)
 	procShowWindow.Call(hwnd, 9) // SW_RESTORE
 	procSetWindowPos.Call(hwnd, hwndTopMost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpShowWindow)
-	procSetWindowPos.Call(hwnd, hwndNotTopMost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpShowWindow)
+
+	// Очередь ввода переднего окна на короткое время становится нашей:
+	// иначе SetForegroundWindow молча отказывает процессу, который запустил
+	// фоновый установщик.
+	fg, _, _ := procGetForeground.Call()
+	current, _, _ := procGetCurrentThreadId.Call()
+	var fgThread uintptr
+	if fg != 0 && fg != hwnd {
+		fgThread, _, _ = procGetWindowThread.Call(fg, 0)
+	}
+	attached := false
+	if fgThread != 0 && fgThread != current {
+		ok, _, _ := procAttachThreadInput.Call(current, fgThread, 1)
+		attached = ok != 0
+	}
+	procBringWindowToTop.Call(hwnd)
 	procSetForeground.Call(hwnd)
+	if attached {
+		procAttachThreadInput.Call(current, fgThread, 0)
+	}
+	procSetWindowPos.Call(hwnd, hwndNotTopMost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpShowWindow)
 	flashUntilForeground(hwnd)
+}
+
+// revealAfterUpdate несколько секунд добивается, чтобы окно стало видимым.
+// Ранние ShowWindow скрытый запуск обновления ещё успевает отменить.
+func revealAfterUpdate(hwnd uintptr) {
+	if argRun || hwnd == 0 || revealDone {
+		return
+	}
+	revealTries++
+	visible, _, _ := procIsWindowVisible.Call(hwnd)
+	fg, _, _ := procGetForeground.Call()
+	if visible != 0 && fg == hwnd {
+		revealDone = true
+		return
+	}
+	if visible == 0 {
+		procShowWindow.Call(hwnd, swShow)
+		procShowWindow.Call(hwnd, 9) // SW_RESTORE
+	}
+	if revealTries == 4 || revealTries == 8 {
+		showMainWindow(hwnd)
+	}
+	if revealTries >= 16 {
+		revealDone = true
+	}
 }
 
 type flashInfo struct {
