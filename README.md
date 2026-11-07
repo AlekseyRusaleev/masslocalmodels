@@ -6,7 +6,6 @@
 
 ## Текущее состояние
 
-Control Plane работает: `https://api.nshno.tech` и `https://control.nshno.tech` (VPS в Москве, Let's Encrypt, деплой 2026-11-05).
 Go API 0.4.0: PostgreSQL 16, NATS JetStream, OpenAI-совместимый инференс через очередь заданий, вход в панель по паролю и сессиям, метрики Prometheus, бэкап БД по расписанию. Детали — [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Документы
@@ -72,3 +71,7 @@ DATABASE_URL=... API_PEPPER=<32+ символов> ./api-gateway bootstrap-admin
 - `assets/05-worker-settings.png` — настройки Worker Agent.
 
 Макеты концептуальные: точные подписи и поведение элементов описаны в основном Markdown-документе.
+
+## Лицензия
+
+Код распространяется по [Apache License 2.0](LICENSE).
