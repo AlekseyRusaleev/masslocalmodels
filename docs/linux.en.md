@@ -25,6 +25,24 @@ Running `setup` again does not create a second node once `/etc/compute-network/a
 
 The network code is needed only when the owner has turned it on. The person who has the code puts it in the command.
 
+## Connection data
+
+At the end of `setup` the program writes a note and prints its path:
+
+```text
+/etc/compute-network/connection.txt
+```
+
+The file holds the base URL, the model name, and the API key, plus examples for clients. The full key is not printed on screen. Open the note with:
+
+```bash
+sudo cat /etc/compute-network/connection.txt
+```
+
+Those three fields go into the chat program on the computer where messages are written. The harness on the server itself is filled in only when it is already installed there. A normal Ubuntu Server does not have it, so the address and the key are copied into the harness on the computer used for chat.
+
+Running `setup` again does not issue a new key. The node is already enrolled, and the note stays as it is.
+
 ## Commands
 
 | Command | What it does |

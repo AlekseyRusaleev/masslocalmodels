@@ -31,6 +31,8 @@ If the model is already in memory, it answers immediately. After the answer, and
 
 The Windows program installs what it needs: Ollama for a whole model, and `llama-server` plus `ggml-rpc-server` from llama.cpp build b12167 when those files are not already on the disk.
 
+Ubuntu Server does not use the window. The `setup` command installs Ollama and llama.cpp, downloads the model, and starts the service. At the end it prints the path to the file with the chat connection data: the base URL, the model name, and the API key. The full key is not printed on screen; it stays in that file. The full instructions are in [`docs/linux.en.md`](docs/linux.en.md).
+
 ## In this repository
 
 - [`cmd/api-gateway`](cmd/api-gateway) — the control-plane API.
