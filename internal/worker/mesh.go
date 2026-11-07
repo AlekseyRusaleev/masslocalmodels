@@ -449,6 +449,13 @@ func meshMemoryNeed(weightsBytes uint64) uint64 {
 // «Remote RPC server crashed»; при 6 ГБ свободной VRAM тот же запуск проходил.
 func meshVRAMNeed(weightsBytes uint64) uint64 {
 	need := weightsBytes/2 + 1<<30
+	// На карте 8 ГБ рабочий стол занимает около 1 ГБ, поэтому 7,6 ГБ свободными
+	// не бывают. Запуск проходил при 6 ГБ свободных и падал при 1,7 ГБ,
+	// когда модель ещё держала Ollama.
+	const observedOK = uint64(6) << 30
+	if need > observedOK {
+		need = observedOK
+	}
 	if min := uint64(2) << 30; need < min {
 		need = min
 	}
