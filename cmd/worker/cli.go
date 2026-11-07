@@ -40,7 +40,9 @@ const defaultControl = "https://control.nshno.tech"
 var cliCommands = map[string]bool{
 	"join": true, "register": true, "enroll": true, "run": true, "status": true, "discover": true,
 	"fetch": true, "model": true, "benchmark": true, "gguf": true, "serve": true,
-	"mesh": true, "mesh-link": true, "pause": true, "resume": true, "version": true, "--version": true, "-v": true,
+	"mesh": true, "mesh-link": true, "pause": true, "resume": true,
+	"setup": true, "start": true, "stop": true, "update": true,
+	"version": true, "--version": true, "-v": true,
 }
 
 // runCLI выполняет команду агента (тот же файл, что и окно с треем).
@@ -82,8 +84,17 @@ func runCLI(args []string) {
 		cmdMeshLink(args, logger)
 	case "pause":
 		cmdSetPaused(args, true)
+		worker.ReleaseLocalGPU()
 	case "resume":
 		cmdSetPaused(args, false)
+	case "setup":
+		cmdSetup(args, logger)
+	case "start":
+		cmdStart(args, logger)
+	case "stop":
+		cmdStop(args, logger)
+	case "update":
+		cmdUpdate(args, logger)
 	case "version", "--version", "-v":
 		fmt.Printf("worker-agent %s (%s/%s)\n", worker.AgentVersion, runtime.GOOS, runtime.GOARCH)
 	default:

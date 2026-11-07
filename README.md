@@ -39,6 +39,7 @@ The Windows program installs what it needs: Ollama for a whole model, and `llama
 - [`internal/store`](internal/store) — PostgreSQL, including the automatic layer layout.
 - [`migrations`](migrations) — database migrations.
 - [`docs/how-it-works.en.md`](docs/how-it-works.en.md) — how the system works now.
+- [`docs/linux.en.md`](docs/linux.en.md) — install and commands for Ubuntu Server.
 - [`docs/adr`](docs/adr) — decisions recorded along the way. Where they disagree with the file above, that file wins.
 - [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](DISTRIBUTED_AI_PLATFORM_PLAN.md) — the original specification, not a description of the current program.
 

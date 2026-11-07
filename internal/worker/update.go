@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -67,7 +68,7 @@ func CheckRelease(ctx context.Context, controlURL string) (Release, bool, error)
 	control := normalizeControl(controlURL)
 	reqCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, control+"/node/release.json", nil)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, releaseManifest(control), nil)
 	if err != nil {
 		return Release{}, false, err
 	}
@@ -89,7 +90,7 @@ func CheckRelease(ctx context.Context, controlURL string) (Release, bool, error)
 	rel.SHA256 = strings.TrimSpace(rel.SHA256)
 	rel.URL = strings.TrimSpace(rel.URL)
 	if rel.URL == "" {
-		rel.URL = control + "/node/compute-node.exe"
+		rel.URL = defaultReleaseURL(control)
 	}
 	if err := validateRelease(control, rel); err != nil {
 		return Release{}, false, err
@@ -128,6 +129,21 @@ func InstallRelease(ctx context.Context, _ Release, progress func(done, total in
 		return fmt.Errorf("обновление не скачалось: %w", err)
 	}
 	return swapExecutable(exe, staged)
+}
+
+func releaseManifest(control string) string {
+	name := "release.json"
+	if runtime.GOOS == "linux" {
+		name = "release-linux.json"
+	}
+	return control + "/node/" + name
+}
+
+func defaultReleaseURL(control string) string {
+	if runtime.GOOS == "linux" {
+		return control + "/node/compute-node-linux"
+	}
+	return control + "/node/compute-node.exe"
 }
 
 func normalizeControl(controlURL string) string {

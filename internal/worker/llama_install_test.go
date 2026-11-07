@@ -17,6 +17,12 @@ func TestLlamaCUDAFamily(t *testing.T) {
 	if got := llamaCUDAFamily(""); got != "13.4" {
 		t.Fatalf("пустая версия → %s", got)
 	}
+	if got := linuxCUDAFamily("12.8"); got != "12.8" {
+		t.Fatalf("Linux CUDA 12 → %s", got)
+	}
+	if got := linuxCUDAFamily("13.0"); got != "13.4" {
+		t.Fatalf("Linux CUDA 13 → %s", got)
+	}
 }
 
 func TestExtractZipKeepsFilesInsideTheDestination(t *testing.T) {

@@ -39,6 +39,7 @@ flowchart TB
 - [`internal/store`](internal/store) — PostgreSQL, в том числе автоматическая раскладка слоёв.
 - [`migrations`](migrations) — миграции базы.
 - [`docs/how-it-works.md`](docs/how-it-works.md) — как система работает сейчас.
+- [`docs/linux.md`](docs/linux.md) — установка и команды для Ubuntu Server.
 - [`docs/adr`](docs/adr) — решения, записанные по ходу; при расхождении с файлом выше верен он.
 - [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](DISTRIBUTED_AI_PLATFORM_PLAN.md) — исходное техническое задание, не описание текущей программы.
 

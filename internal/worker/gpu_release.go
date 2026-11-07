@@ -7,7 +7,9 @@ import "strings"
 // Чужой llama-server, запущенный не из Ollama и не из каталога нашей сборки,
 // не трогаем: у человека может быть свой.
 func holdsGPU(path string) bool {
-	p := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(path), "/", `\`))
+	p := strings.ToLower(strings.TrimSpace(path))
+	p = strings.TrimSuffix(p, " (deleted)")
+	p = strings.ReplaceAll(p, "/", `\`)
 	if p == "" {
 		return false
 	}
@@ -15,13 +17,16 @@ func holdsGPU(path string) bool {
 	if i := strings.LastIndex(p, `\`); i >= 0 {
 		base = p[i+1:]
 	}
-	if strings.Contains(p, `\ollama\lib\ollama\`) && strings.HasPrefix(base, "llama-server") && strings.HasSuffix(base, ".exe") {
+	name := strings.TrimSuffix(base, ".exe")
+	if strings.Contains(p, `\lib\ollama\`) && strings.HasPrefix(name, "llama-server") {
 		return true
 	}
-	switch base {
-	case "llama-server.exe", "ggml-rpc-server.exe":
+	switch name {
+	case "llama-server", "ggml-rpc-server":
 	default:
 		return false
 	}
-	return strings.Contains(p, `\computenetwork\llama\`) || strings.Contains(p, `\llama-cpp-ifm\`)
+	return strings.Contains(p, `\computenetwork\llama\`) ||
+		strings.Contains(p, `\.compute-network\llama\`) ||
+		strings.Contains(p, `\llama-cpp-ifm\`)
 }

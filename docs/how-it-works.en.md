@@ -141,4 +141,4 @@ The computer that computes the request does see that text. Otherwise it could no
 - updates its own exe and shows the window again after a silent update;
 - frees the graphics card after an answer, and also on Disconnect, pause, and exit.
 
-A person does not lay out layers by hand and does not have to unload the model before the next message.
+On Windows the participant program is a window. On Linux the same actions are the commands `setup`, `start`, `stop`, `pause`, `resume`, `status`, and `update`. The commands are described in [`linux.en.md`](linux.en.md).

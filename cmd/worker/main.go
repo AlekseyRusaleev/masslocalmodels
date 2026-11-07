@@ -56,5 +56,5 @@ func usage() {
   fetch     --url <url> --out <файл>
   gguf      --file <файл> [--parts N]
   serve     [--model <модель>] [--config <файл>]
-  pause, resume, version`)
+  pause, resume, setup, start, stop, update, version`)
 }

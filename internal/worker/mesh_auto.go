@@ -39,10 +39,12 @@ func prepareAutomaticMesh(cfg workercfg.Config) workercfg.Config {
 // Сначала явный путь, потом каталог, куда программа ставит сборку сама,
 // и только затем старая ручная установка.
 func findLlamaDir() string {
-	if dir := strings.TrimSpace(os.Getenv("COMPUTE_LLAMA_DIR")); llamaRuntimeReady(dir) {
-		return dir
+	if dir := strings.TrimSpace(os.Getenv("COMPUTE_LLAMA_DIR")); dir != "" {
+		if found := locateLlamaDir(dir); found != "" {
+			return found
+		}
 	}
-	if dir := llamaInstallDir(); llamaRuntimeReady(dir) {
+	if dir := locateLlamaDir(llamaInstallDir()); dir != "" {
 		return dir
 	}
 	home, err := os.UserHomeDir()
@@ -59,6 +61,28 @@ func findLlamaDir() string {
 			continue
 		}
 		dir := filepath.Join(root, entry.Name(), "llama")
+		if llamaRuntimeReady(dir) {
+			return dir
+		}
+	}
+	return ""
+}
+
+// locateLlamaDir находит каталог с обоими файлами: архив иногда кладёт их
+// на уровень ниже корня распаковки.
+func locateLlamaDir(root string) string {
+	if llamaRuntimeReady(root) {
+		return root
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
 		if llamaRuntimeReady(dir) {
 			return dir
 		}
@@ -83,14 +107,15 @@ func localWeightsFile(model string) string {
 	if !ok {
 		return ""
 	}
-	dir := ollamaModelDir()
-	if dir == "" {
-		return ""
+	for _, dir := range ollamaModelDirs() {
+		if dir == "" {
+			continue
+		}
+		path := filepath.Join(dir, "blobs", "sha256-"+digest)
+		info, err := os.Stat(path)
+		if err == nil && info.Size() > 0 {
+			return path
+		}
 	}
-	path := filepath.Join(dir, "blobs", "sha256-"+digest)
-	info, err := os.Stat(path)
-	if err != nil || info.Size() == 0 {
-		return ""
-	}
-	return path
+	return ""
 }

@@ -235,16 +235,33 @@ func VerifyLocalWeights(ctx context.Context, model, digest string) bool {
 	return actual == digest
 }
 
-// ollamaModelDir — где рантайм хранит блобы весов.
+// ollamaModelDirs — где искать блобы. Служба Ollama на Linux кладёт их
+// в домашний каталог пользователя ollama, а не в каталог того, кто запустил агент.
+func ollamaModelDirs() []string {
+	var dirs []string
+	if dir := strings.TrimSpace(os.Getenv("OLLAMA_MODELS")); dir != "" {
+		dirs = append(dirs, dir)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dirs = append(dirs, filepath.Join(home, ".ollama", "models"))
+	}
+	dirs = append(dirs, "/usr/share/ollama/.ollama/models")
+	return dirs
+}
+
+// ollamaModelDir — первый существующий каталог блобов, иначе домашний.
 func ollamaModelDir() string {
-	if dir := os.Getenv("OLLAMA_MODELS"); dir != "" {
-		return dir
+	dirs := ollamaModelDirs()
+	for _, dir := range dirs {
+		info, err := os.Stat(dir)
+		if err == nil && info.IsDir() {
+			return dir
+		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
+	if len(dirs) > 0 {
+		return dirs[0]
 	}
-	return filepath.Join(home, ".ollama", "models")
+	return ""
 }
 
 // LoadedModel сообщает, какая модель сейчас загружена в рантайме и с каким

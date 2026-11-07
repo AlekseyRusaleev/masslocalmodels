@@ -6,7 +6,13 @@ import "fmt"
 
 // Графический режим есть только на Windows: на сервере узел работает службой.
 func runGUI() int {
-	fmt.Println("графический режим доступен только на Windows")
-	fmt.Println("используйте: compute-node join --invite <код>")
+	fmt.Println("на Linux окна нет: узел ставится и управляется командами")
+	fmt.Println("  sudo compute-node setup --code <код>")
+	fmt.Println("  sudo compute-node start")
+	fmt.Println("  sudo compute-node stop")
+	fmt.Println("  sudo compute-node pause")
+	fmt.Println("  sudo compute-node resume")
+	fmt.Println("  compute-node status")
+	fmt.Println("  sudo compute-node update")
 	return 2
 }

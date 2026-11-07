@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -722,6 +723,23 @@ func (r *meshRuntime) stop() {
 	r.log.Info("mesh runtime stopped", "role", r.role)
 }
 
+// withLibraryPath добавляет каталог сборки в поиск библиотек: на Linux
+// llama-server ищет libcudart и libggml рядом с собой.
+func withLibraryPath(dir string) []string {
+	out := make([]string, 0)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "LD_LIBRARY_PATH=") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	value := dir
+	if old := os.Getenv("LD_LIBRARY_PATH"); old != "" {
+		value = dir + string(os.PathListSeparator) + old
+	}
+	return append(out, "LD_LIBRARY_PATH="+value)
+}
+
 // startMeshRuntime запускает процесс стадии и ждёт его готовности.
 func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log *slog.Logger) (*meshRuntime, error) {
 	dir := m.LlamaDir
@@ -742,7 +760,7 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 			log.Warn("mesh: RPC port is exposed beyond loopback; "+
 				"protocol has no TLS or auth — use a tunnel", "listen_host", m.ListenHost)
 		}
-		args = []string{"-H", m.ListenHost, "-p", fmt.Sprint(m.RPCPort), "-d", "CPU"}
+		args = []string{"-H", m.ListenHost, "-p", fmt.Sprint(m.RPCPort)}
 		if m.Threads > 0 {
 			args = append(args, "-t", fmt.Sprint(m.Threads))
 		}
@@ -829,6 +847,9 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 
 	cmd := quiet(exec.Command(exe, args...))
 	cmd.Dir = dir
+	if runtime.GOOS != "windows" {
+		cmd.Env = withLibraryPath(dir)
+	}
 	tail := &meshTail{}
 	// Вывод рантайма нужен и в памяти (для текста ошибки), и в файле: разбор
 	// раскладки слоёв и transfer time возможен только по логу llama.cpp.
