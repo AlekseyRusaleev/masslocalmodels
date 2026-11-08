@@ -2,9 +2,9 @@
 
 [Русский](README.ru.md)
 
-**Client:** [Windows](https://api.nshno.tech/node/compute-node.exe) · [Linux](https://api.nshno.tech/node/compute-node-linux)
+One home cannot load and run a large model. You connect to the network, the model is split among the participants, each one contributes their own computing power, and that is how you get the ability to run it.
 
-**Purpose.** Several home computers answer one chat with a model that does not fit on one graphics card. The chat program talks to a single OpenAI-compatible address and does not need to know which computers answered.
+**Client:** [Windows](https://api.nshno.tech/node/compute-node.exe) · [Linux](https://api.nshno.tech/node/compute-node-linux)
 
 **The result that counts.** The client receives the text. The record of that answer has three numbers: tokens per second, seconds until the first token, and the share of draft tokens that were accepted.
 
