@@ -2,6 +2,8 @@
 
 [Русский](README.ru.md)
 
+**Client:** [Windows](https://api.nshno.tech/node/compute-node.exe) · [Linux](https://api.nshno.tech/node/compute-node-linux)
+
 Several home computers run one model together. A model that does not fit on a single graphics card is split by layers: each computer computes one continuous range. The model file stays whole on every participant's disk. A chat program talks to one OpenAI-compatible API and does not need to know which computers answered.
 
 The principles, the two ways a request is answered, and the technologies behind them are in [`docs/how-it-works.en.md`](docs/how-it-works.en.md). The same path is shorter below.
@@ -29,7 +31,7 @@ Each computer downloads the whole model file itself. The first time a group star
 
 If the model is already in memory, it answers immediately. After the answer, and also when Disconnect is clicked, the program frees the graphics card itself. If the layer group does not start, the local model still answers.
 
-The Windows program installs what it needs: Ollama for a whole model, and `llama-server` plus `ggml-rpc-server` from llama.cpp build b12167 when those files are not already on the disk.
+The Windows program installs what it needs: Ollama for a whole model, and `llama-server` plus `ggml-rpc-server` from llama.cpp build b12167 when those files are not already on the disk. Run the client; the window joins the computer to the network.
 
 Ubuntu Server does not use the window. The `setup` command installs Ollama and llama.cpp, downloads the model, and starts the service. At the end it prints the path to the file with the chat connection data: the base URL, the model name, and the API key. The full key is not printed on screen; it stays in that file. The full instructions are in [`docs/linux.en.md`](docs/linux.en.md).
 
