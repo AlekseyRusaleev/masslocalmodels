@@ -251,6 +251,22 @@ func (cfg Config) registerInferenceRoutes(mux *http.ServeMux) {
 		}
 	}))
 
+	// Продление аренды на время подготовки ответа.
+	//
+	// Группа слоёв поднимается минутами: узел уже забрал задание, но чанков
+	// ещё нет. Без отдельного продления задание возвращалось в очередь через
+	// 90 секунд и падало после третьей попытки с «worker stopped responding».
+	mux.Handle("POST /worker/v1/jobs/{id}/lease", cfg.requireWorker(func(w http.ResponseWriter, r *http.Request, wp workerPrincipal) {
+		jobID := r.PathValue("id")
+		if !cfg.holdLease(w, r, jobID, wp.Worker.ID) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"lease_seconds": int(store.JobLease.Seconds()),
+		})
+	}))
+
 	// Поток чанков: узел отправляет их одним запросом с телом в формате NDJSON,
 	// сервер раздаёт их клиенту по мере поступления. Это убирает ожидание
 	// round-trip на каждый токен — при RTT 50–250 мс разница в разы.

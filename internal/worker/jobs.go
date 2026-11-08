@@ -180,6 +180,47 @@ func (c *Client) PostChunk(ctx context.Context, jobID, content, thinking string)
 	return c.postAuthorized(ctx, "/worker/v1/jobs/"+jobID+"/chunk", payload)
 }
 
+// RenewLease подтверждает платформе, что узел всё ещё работает над заданием.
+// Нужен на время загрузки группы слоёв: чанков ещё нет, а аренда истекает.
+func (c *Client) RenewLease(ctx context.Context, jobID string) error {
+	return c.postAuthorized(ctx, "/worker/v1/jobs/"+jobID+"/lease", []byte("{}"))
+}
+
+// leaseRenewEvery — как часто узел подтверждает работу над заданием.
+// Вдвое чаще аренды (90 с): один пропущенный запрос ещё не отдаёт задание
+// другому узлу, а загрузка группы слоёв может идти минутами.
+var leaseRenewEvery = 30 * time.Second
+
+// startLeaseRenewal держит задание за узлом, пока тот готовит ответ.
+// Возвращает функцию остановки: она дожидается горутины, чтобы после неё
+// в журнале не оставалось запросов по уже завершённому заданию.
+func startLeaseRenewal(ctx context.Context, client *Client, jobID string, log *slog.Logger) func() {
+	renewCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(leaseRenewEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				return
+			case <-ticker.C:
+				if err := client.RenewLease(renewCtx, jobID); err != nil {
+					if renewCtx.Err() != nil {
+						return
+					}
+					log.Warn("cannot renew job lease", "job", jobID, "err", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
 // ChunkStream — открытый поток чанков к Control Plane.
 //
 // Один HTTP-запрос на весь ответ: чанки пишутся в тело запроса в формате NDJSON
@@ -694,6 +735,11 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 
 		log.Info("job claimed", "job", job.ID, "model", job.Model)
 		ActiveJobs.Add(1)
+		// Аренда задания живёт 90 секунд. Пока узел готовит ответ (загрузка
+		// группы слоёв занимает минуты), чанков нет, поэтому задание нужно
+		// подтверждать отдельно, иначе оно уходит в очередь и падает после
+		// третьей попытки с «worker stopped responding».
+		stopRenewal := startLeaseRenewal(ctx, client, job.ID, log)
 		// Вид задания определяет обработчик: чат идёт потоком, эмбеддинги —
 		// одним результатом. Шард-координатор обслуживает чат через
 		// llama-server, потому что Ollama не умеет раскладывать слои по узлам.
@@ -745,6 +791,7 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 			result = RunChatJob(ctx, client, job, model, cfg.NumCtx, log)
 		}
 		ActiveJobs.Add(-1)
+		stopRenewal()
 
 		if err := client.FinishJob(ctx, job.ID, result); err != nil {
 			log.Warn("cannot finish job", "job", job.ID, "err", err)
