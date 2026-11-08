@@ -75,6 +75,50 @@ func TestExtractZipRejectsAPathThatEscapes(t *testing.T) {
 	}
 }
 
+func TestFindLlamaDirPrefersStampedRelease(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LOCALAPPDATA", root)
+	manual := filepath.Join(root, "manual")
+	writeReadyLlama(t, manual)
+	t.Setenv("COMPUTE_LLAMA_DIR", manual)
+	if got := findLlamaDir(); got != manual {
+		t.Fatalf("без метки выбран %s", got)
+	}
+
+	official := filepath.Join(root, "ComputeNetwork", "llama-"+llamaRelease)
+	writeReadyLlama(t, official)
+	if err := writeLlamaRelease(official); err != nil {
+		t.Fatal(err)
+	}
+	if got := findLlamaDir(); got != official {
+		t.Fatalf("сборка с меткой должна победить, выбран %s", got)
+	}
+	if readLlamaRelease(official) != llamaRelease {
+		t.Fatalf("метка %q", readLlamaRelease(official))
+	}
+}
+
+func writeReadyLlama(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{executableName("llama-server"), executableName("ggml-rpc-server")} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if filepath.Separator == '\\' {
+		if err := os.WriteFile(filepath.Join(dir, "cudart64_13.dll"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := os.WriteFile(filepath.Join(dir, "libcudart.so.13"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestLlamaRuntimeReadyNeedsCUDAOnWindows(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{executableName("llama-server"), executableName("ggml-rpc-server")} {

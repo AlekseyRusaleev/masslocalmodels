@@ -8,6 +8,7 @@ import {
   fetchWorkers,
   formatGB,
   formatSince,
+  isConnected,
   setRevisionStatus,
   signRevision,
   type ArtifactInput,
@@ -189,7 +190,7 @@ export function ModelsPage({ admin = false }: { admin?: boolean }) {
   };
 
   const servingNodes = new Set(serving.flatMap((model) => model.served_by));
-  const idleNodes = workers.filter((worker) => !servingNodes.has(worker.name));
+  const idleNodes = workers.filter((worker) => isConnected(worker) && !servingNodes.has(worker.name));
 
   return (
     <>
@@ -524,8 +525,8 @@ export function ModelsPage({ admin = false }: { admin?: boolean }) {
 
         {idleNodes.length === 0 ? (
           <div className="notice">
-            <h3 className="notice-title">Все узлы заявили модель</h3>
-            <p className="notice-text">Каждый подключённый узел сообщает, какую модель он готов выполнять.</p>
+            <h3 className="notice-title">Среди подключённых нет компьютеров без модели</h3>
+            <p className="notice-text">Считаются только компьютеры, которые прислали heartbeat за последние две минуты.</p>
           </div>
         ) : (
           <div className="table-scroll">

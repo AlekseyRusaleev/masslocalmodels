@@ -28,15 +28,54 @@ type EnsureLlamaOptions struct {
 
 var llamaInstallMu sync.Mutex
 
-// EnsureLlama ставит llama-server и ggml-rpc-server, если их ещё нет.
+// llamaReleaseStamp — метка каталога, куда программа сама положила сборку.
+// Без неё уже лежащий на диске llama.cpp может быть другой сборки: рукопожатие
+// RPC проходит, а следующая команда обрывается.
+const llamaReleaseStamp = "compute-network-release.txt"
+
+// llamaReleaseDir — отдельный каталог сборки. Старый каталог не перезаписывается,
+// пока из него ещё запущен ggml-rpc-server: на Windows такой файл не заменить.
+func llamaReleaseDir() string {
+	base := llamaInstallDir()
+	if base == "" {
+		return ""
+	}
+	return base + "-" + llamaRelease
+}
+
+// officialLlamaDir — каталог, где лежит именно закреплённая сборка.
+func officialLlamaDir() string {
+	root := llamaReleaseDir()
+	if root == "" {
+		return ""
+	}
+	dir := locateLlamaDir(root)
+	if dir == "" || !llamaRuntimeReady(dir) || readLlamaRelease(dir) != llamaRelease {
+		return ""
+	}
+	return dir
+}
+
+func readLlamaRelease(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, llamaReleaseStamp))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func writeLlamaRelease(dir string) error {
+	return os.WriteFile(filepath.Join(dir, llamaReleaseStamp), []byte(llamaRelease+"\n"), 0o644)
+}
+
+// EnsureLlama ставит закреплённую сборку llama.cpp, если её ещё нет.
 //
-// Готовый каталог не трогает: ни свою прошлую установку, ни ручную.
-// Ошибка скачивания не должна ронять узел — чат без разделения слоёв
-// по-прежнему идёт через Ollama.
+// Уже лежащий чужой каталог не считается заменой: RPC разных сборок
+// здоровается и рвёт следующую команду. Ошибка скачивания не роняет узел.
 func EnsureLlama(ctx context.Context, opts EnsureLlamaOptions) (string, error) {
 	llamaInstallMu.Lock()
 	defer llamaInstallMu.Unlock()
-	if dir := findLlamaDir(); dir != "" {
+	if dir := officialLlamaDir(); dir != "" {
 		return dir, nil
 	}
 	return installLlama(ctx, opts)

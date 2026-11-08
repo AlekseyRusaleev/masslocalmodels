@@ -36,6 +36,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +53,10 @@ const (
 	// meshReadyTimeout — сколько ждём готовности шард-группы. Холодный старт
 	// включает передачу тензоров стадии и загрузку слоёв в VRAM.
 	meshReadyTimeout = 5 * time.Minute
-	// meshRemoteReadyTimeout — ожидание группы с удалённой стадией: тензоры
-	// передаются по сети со скоростью канала (измерено 1.4 MB/s через VPS).
-	meshRemoteReadyTimeout = 45 * time.Minute
+	// meshRemoteReadyTimeout — ожидание группы с удалённой стадией.
+	// На измеренной отдаче 1.4 МБ/с половина файла в 13 ГБ идёт больше часа.
+	// Прежние 45 минут обрывали загрузку, которая ещё не успевала закончиться.
+	meshRemoteReadyTimeout = 2 * time.Hour
 	// meshRuntimeRoles — допустимые роли в шард-группе.
 	meshRoleCoordinator = "coordinator"
 	meshRoleCompute     = "compute"
@@ -231,8 +233,9 @@ func MeshOptionsOf(cfg workercfg.Config) *workercfg.Mesh {
 // файлы на машинах.
 var meshPlan struct {
 	sync.RWMutex
-	plan ResolvedMesh
-	set  bool
+	plan   ResolvedMesh
+	stages []ResolvedMesh
+	set    bool
 }
 
 // SetMeshPlan запоминает разрешённый план участия.
@@ -241,6 +244,21 @@ func SetMeshPlan(plan ResolvedMesh) {
 	defer meshPlan.Unlock()
 	meshPlan.plan = plan
 	meshPlan.set = true
+	if plan.Role == meshRoleCompute {
+		meshPlan.stages = []ResolvedMesh{plan}
+		return
+	}
+	meshPlan.stages = nil
+}
+
+// setMeshPlans запоминает группу, в которой этот компьютер ведёт свой чат,
+// и группы, где он только держит слои для чужих чатов.
+func setMeshPlans(primary ResolvedMesh, stages []ResolvedMesh) {
+	meshPlan.Lock()
+	defer meshPlan.Unlock()
+	meshPlan.plan = primary
+	meshPlan.stages = append([]ResolvedMesh(nil), stages...)
+	meshPlan.set = true
 }
 
 // CurrentMeshPlan возвращает последний план участия.
@@ -248,6 +266,13 @@ func CurrentMeshPlan() (ResolvedMesh, bool) {
 	meshPlan.RLock()
 	defer meshPlan.RUnlock()
 	return meshPlan.plan, meshPlan.set
+}
+
+// CurrentMeshStages — группы, в которых этот компьютер только держит слои.
+func CurrentMeshStages() []ResolvedMesh {
+	meshPlan.RLock()
+	defer meshPlan.RUnlock()
+	return append([]ResolvedMesh(nil), meshPlan.stages...)
 }
 
 // draftSpecArgs выбирает черновик для llama-server.
@@ -299,6 +324,7 @@ func ClearMeshPlan() {
 	meshPlan.Lock()
 	defer meshPlan.Unlock()
 	meshPlan.plan = ResolvedMesh{}
+	meshPlan.stages = nil
 	meshPlan.set = false
 }
 
@@ -318,7 +344,10 @@ func RefreshMeshPlan(ctx context.Context, client *Client, cfg workercfg.Config) 
 	}
 
 	// Модель из конфигурации важнее порядка: если узлов в сети несколько,
-	// случайная топология чужой модели нам не подходит.
+	// случайная топология чужой модели нам не подходит. Своя группа, где
+	// этот компьютер ведущий, важнее чужой, где он только держит слои:
+	// иначе свой чат никогда не дойдёт до своего компьютера.
+	var plans []ResolvedMesh
 	for _, detail := range assignments.Assignments {
 		if detail.Topology.Status != "active" && detail.Topology.Status != "staging" {
 			continue
@@ -330,10 +359,39 @@ func RefreshMeshPlan(ctx context.Context, client *Client, cfg workercfg.Config) 
 		if err != nil {
 			continue
 		}
-		SetMeshPlan(plan)
-		return plan, nil
+		plans = append(plans, plan)
 	}
-	return ResolvedMesh{}, fmt.Errorf("узел не входит в активную топологию")
+	if len(plans) == 0 {
+		ClearMeshPlan()
+		return ResolvedMesh{}, fmt.Errorf("узел не входит в активную топологию")
+	}
+	primary, stages := chooseMeshPlans(plans)
+	setMeshPlans(primary, stages)
+	return primary, nil
+}
+
+// chooseMeshPlans оставляет ведущей ту группу, где этот компьютер сам
+// координатор. Остальные группы — чужие чаты: в них компьютер только стадия.
+func chooseMeshPlans(plans []ResolvedMesh) (ResolvedMesh, []ResolvedMesh) {
+	var (
+		primary    ResolvedMesh
+		hasPrimary bool
+		stages     []ResolvedMesh
+	)
+	for _, plan := range plans {
+		if plan.Role == meshRoleCoordinator && !hasPrimary {
+			primary = plan
+			hasPrimary = true
+			continue
+		}
+		if plan.Role == meshRoleCompute {
+			stages = append(stages, plan)
+		}
+	}
+	if !hasPrimary && len(plans) > 0 {
+		primary = plans[0]
+	}
+	return primary, stages
 }
 
 // MeshForStage строит настройки стадии (compute) для запуска RPC-сервера.
@@ -346,6 +404,12 @@ func MeshForStage(cfg workercfg.Config) (workercfg.Mesh, error) {
 		return workercfg.Mesh{}, fmt.Errorf("шард-режим не настроен")
 	}
 	if base.Role == meshRoleAuto {
+		// Свой чат этот компьютер ведёт сам, но пока чата нет, он держит слои
+		// для чужих. RPC поднимается по чужой группе, даже если свой план —
+		// уже роль координатора.
+		if stages := CurrentMeshStages(); len(stages) > 0 {
+			return meshFromPlan(*base, stages[0]), nil
+		}
 		plan, ok := CurrentMeshPlan()
 		if !ok {
 			return *base, fmt.Errorf("план шард-группы ещё не получен с платформы")
@@ -353,13 +417,7 @@ func MeshForStage(cfg workercfg.Config) (workercfg.Mesh, error) {
 		if plan.Role != meshRoleCompute {
 			return *base, fmt.Errorf("узел не стадия, а %s", plan.Role)
 		}
-		resolved := *base
-		resolved.Role = plan.Role
-		resolved.Layers = plan.Layers
-		resolved.TopologyID = plan.TopologyID
-		resolved.SelfWorkerID = plan.SelfWorkerID
-		resolved.CoordinatorID = plan.CoordinatorID
-		return resolved, nil
+		return meshFromPlan(*base, plan), nil
 	}
 	if base.Role != meshRoleCompute {
 		return withDraftFromConfig(cfg, *base), fmt.Errorf("роль %s не стадия", base.Role)
@@ -392,12 +450,7 @@ func MeshForJob(cfg workercfg.Config) (workercfg.Mesh, error) {
 			strings.Join(plan.Missing, ", "))
 	}
 
-	resolved := *base
-	resolved.Role = plan.Role
-	resolved.Layers = plan.Layers
-	resolved.TopologyID = plan.TopologyID
-	resolved.SelfWorkerID = plan.SelfWorkerID
-	resolved.CoordinatorID = plan.CoordinatorID
+	resolved := meshFromPlan(*base, plan)
 	if plan.Model != "" {
 		resolved.Model = plan.Model
 	}
@@ -413,6 +466,15 @@ func MeshForJob(cfg workercfg.Config) (workercfg.Mesh, error) {
 		resolved.PeerWorkers = append(resolved.PeerWorkers, peer.WorkerID)
 	}
 	return withDraftFromConfig(cfg, resolved), nil
+}
+
+func meshFromPlan(base workercfg.Mesh, plan ResolvedMesh) workercfg.Mesh {
+	base.Role = plan.Role
+	base.Layers = plan.Layers
+	base.TopologyID = plan.TopologyID
+	base.SelfWorkerID = plan.SelfWorkerID
+	base.CoordinatorID = plan.CoordinatorID
+	return base
 }
 
 // meshTail запоминает хвост вывода процесса: по нему видно, почему рантайм
@@ -457,8 +519,10 @@ type meshRuntime struct {
 	sink     io.Closer
 	// dialers — локальные порты-туннели к стадиям без прямого адреса.
 	dialers []*MeshTunnelDialer
-	// listener — исходящая сторона стадии, если связь идёт туннелем.
-	listener *MeshTunnelListener
+	// listeners — исходящие стороны стадии, по одной на чужую группу.
+	// Одна карта принимает одно соединение RPC за раз, но слушать должна
+	// каждую группу: иначе чат человека, чья группа не первая, до слоёв не дойдёт.
+	listeners []*MeshTunnelListener
 	// remote — в группе есть стадия за туннелем: старт долгий.
 	remote bool
 }
@@ -490,21 +554,28 @@ type MeshMemoryPlan struct {
 // ядро отдаёт под давлением; не хватает не их, а буферов вычисления и
 // KV-кэша. Наблюдённые точки на этой машине (файл 5 ГБ): при 1.1 ГБ свободной
 // RAM llama-server падал на «Memory allocation failure», при 6–10 ГБ работал.
-// Оценка ниже сознательно между ними: weights/2 + 2 ГБ.
+// Оценка для небольшого файла — weights/2 + 2 ГБ. Для большого файла половина
+// весов уже не про буферы: на 16 ГБ свободными 8 ГБ не бывают. Потолок тот же,
+// что у видеопамяти, — наблюдённые 6 ГБ.
 func meshMemoryNeed(weightsBytes uint64) uint64 {
 	need := weightsBytes/2 + 2<<30
+	const observedOK = uint64(6) << 30
+	if need > observedOK {
+		need = observedOK
+	}
 	if min := uint64(3) << 30; need < min {
 		need = min
 	}
 	return need
 }
 
-// meshVRAMNeed оценивает, сколько видеопамяти нужно координатору.
+// meshVRAMNeed проверяет, свободна ли карта, а не то, влезет ли весь файл.
 //
-// Слои делятся между его картой и стадиями, поэтому целиком модель в VRAM не
-// нужна. Наблюдённые отказы: при 1.7 ГБ свободной VRAM (Ollama держала модель
-// на 5.7 ГБ) группа поднималась, но падала на первом же токене с
-// «Remote RPC server crashed»; при 6 ГБ свободной VRAM тот же запуск проходил.
+// Слои кладёт llama.cpp --fit: локальная карта, RPC и при нужде RAM.
+// Потолок 6 ГБ — наблюдённая отметка «Ollama уже не держит модель». Ниже
+// (1.7 ГБ) группа поднималась и падала на первом токене. Это не оценка
+// доли файла: 72B на карте 8 ГБ при потолке 6 ГБ раньше проходила проверку,
+// а потом -ngl 99 просил 12 ГБ. Сама проверка остается про свободную карту.
 func meshVRAMNeed(weightsBytes uint64) uint64 {
 	need := weightsBytes/2 + 1<<30
 	// На карте 8 ГБ рабочий стол занимает около 1 ГБ, поэтому 7,6 ГБ свободными
@@ -621,31 +692,36 @@ func ensureMeshMemory(ctx context.Context, ggufPath string, log *slog.Logger) er
 // нельзя.
 func EnsureMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log *slog.Logger) (*meshRuntime, error) {
 	m = MeshNormalize(m)
-	key := meshConfigKey(m)
+	key := meshRuntimeKey(m)
 
 	meshProcess.Lock()
-	defer meshProcess.Unlock()
-
-	if meshProcess.rt != nil && meshProcess.configK == key {
-		if meshProcess.rt.alive() {
-			return meshProcess.rt, nil
-		}
-		meshProcess.rt.stop()
-		meshProcess.rt = nil
-		meshProcess.configK = ""
+	if meshProcess.rt != nil && meshProcess.configK == key && meshProcess.rt.alive() {
+		rt := meshProcess.rt
+		meshProcess.Unlock()
+		return rt, nil
 	}
 	if meshProcess.rt != nil {
 		meshProcess.rt.stop()
 		meshProcess.rt = nil
 		meshProcess.configK = ""
 	}
+	// Замок нельзя держать, пока грузятся слои. Ожидание занимает десятки
+	// минут, а пульс узла берёт тот же замок. Без пульса дольше двух минут
+	// платформа распускает группу, и вторая сторона туннеля пропадает.
+	meshProcess.Unlock()
 
 	rt, err := startMeshRuntime(ctx, client, m, log)
 	if err != nil {
 		return nil, err
 	}
+
+	meshProcess.Lock()
+	if meshProcess.rt != nil {
+		meshProcess.rt.stop()
+	}
 	meshProcess.rt = rt
 	meshProcess.configK = key
+	meshProcess.Unlock()
 	return rt, nil
 }
 
@@ -690,13 +766,33 @@ func MeshStatus() MeshStatusInfo {
 	}
 }
 
+// meshRuntimeKey добавляет к отпечатку чужие группы, в которых этот
+// компьютер держит слои. Новый участник обязан перезапустить RPC: иначе
+// туннель к нему не откроется.
+func meshRuntimeKey(m workercfg.Mesh) string {
+	key := meshConfigKey(m)
+	if m.Role != meshRoleCompute {
+		return key
+	}
+	stages := CurrentMeshStages()
+	if len(stages) == 0 {
+		return key
+	}
+	ids := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		ids = append(ids, stage.TopologyID+"@"+stage.CoordinatorID)
+	}
+	sort.Strings(ids)
+	return key + "|" + strings.Join(ids, ",")
+}
+
 // meshConfigKey — отпечаток конфигурации: при его смене рантайм перезапускается.
 func meshConfigKey(m workercfg.Mesh) string {
 	return strings.Join([]string{
 		m.Role, m.Model, m.GGUFPath, m.Layers, strings.Join(m.Peers, ","),
 		strings.Join(m.PeerWorkers, ","), m.TopologyID, m.SelfWorkerID,
 		fmt.Sprint(m.ServerPort, m.RPCPort, m.Ctx, m.Threads, m.ListenHost, m.Cache),
-		m.SpecType, m.DraftGGUFPath,
+		m.SpecType, m.DraftGGUFPath, m.LlamaDir,
 	}, "|")
 }
 
@@ -765,10 +861,10 @@ func (r *meshRuntime) stop() {
 		dialer.Close()
 	}
 	r.dialers = nil
-	if r.listener != nil {
-		r.listener.Close()
-		r.listener = nil
+	for _, listener := range r.listeners {
+		listener.Close()
 	}
+	r.listeners = nil
 	_ = r.cmd.Process.Kill()
 	select {
 	case <-r.waited:
@@ -796,6 +892,44 @@ func withLibraryPath(dir string) []string {
 		value = dir + string(os.PathListSeparator) + old
 	}
 	return append(out, "LD_LIBRARY_PATH="+value)
+}
+
+// coordinatorServerArgs — флаги llama-server для ведущего.
+//
+// -ngl 99 сюда не входит: тогда llama.cpp считает число слоёв на GPU заданным
+// человеком и отказывается ужать его под свободную память карт и RPC.
+// На карте 8 ГБ это заканчивалось cudaMalloc на 12 ГБ. --fit сам раскладывает
+// слои по локальной карте, RPC-стадиям и при нужде по RAM. Окно контекста
+// --fit уменьшать не должен: его нижняя граница совпадает с -c.
+func coordinatorServerArgs(m workercfg.Mesh, rpcAddrs []string) []string {
+	args := []string{
+		"-m", m.GGUFPath,
+		"-c", fmt.Sprint(m.Ctx),
+		"-np", "1",
+		"--host", "127.0.0.1",
+		"--port", fmt.Sprint(m.ServerPort),
+		"--no-webui",
+		"--metrics",
+		"--fit", "on",
+		"--fit-ctx", fmt.Sprint(m.Ctx),
+	}
+	if len(rpcAddrs) > 0 {
+		args = append(args, "--rpc", strings.Join(rpcAddrs, ","))
+	}
+	if len(m.Split) > 0 {
+		parts := make([]string, 0, len(m.Split))
+		for _, share := range m.Split {
+			parts = append(parts, fmt.Sprintf("%g", share))
+		}
+		args = append(args, "-ts", strings.Join(parts, ","))
+	}
+	if m.Threads > 0 {
+		args = append(args, "-t", fmt.Sprint(m.Threads))
+	}
+	if m.NCPUMoE > 0 {
+		args = append(args, "--n-cpu-moe", fmt.Sprint(m.NCPUMoE))
+	}
+	return args
 }
 
 // startMeshRuntime запускает процесс стадии и ждёт его готовности.
@@ -833,15 +967,6 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 		if _, err := os.Stat(m.GGUFPath); err != nil {
 			return nil, fmt.Errorf("mesh: не читается файл весов %s: %w", m.GGUFPath, err)
 		}
-		args = []string{
-			"-m", m.GGUFPath,
-			"-c", fmt.Sprint(m.Ctx),
-			"-np", "1",
-			"--host", "127.0.0.1",
-			"--port", fmt.Sprint(m.ServerPort),
-			"--no-webui",
-			"--metrics",
-		}
 		// Соисполнители без прямого адреса доступны через туннель: локальный
 		// порт-прокси выглядит для llama-server как обычный RPC-сервер.
 		rpcAddrs := append([]string{}, m.Peers...)
@@ -855,28 +980,7 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 			rpcAddrs = append(rpcAddrs, tunnel.Addr())
 			log.Info("mesh tunnel ready", "worker_id", workerID, "local_addr", tunnel.Addr())
 		}
-		if len(rpcAddrs) > 0 {
-			args = append(args, "--rpc", strings.Join(rpcAddrs, ","))
-		}
-		// -ngl 99 означает «все слои на устройства»: локальная карта и
-		// RPC-стадии делят их по свободной памяти или по явным долям.
-		args = append(args, "-ngl", "99")
-		if len(m.Split) > 0 {
-			parts := make([]string, 0, len(m.Split))
-			for _, share := range m.Split {
-				parts = append(parts, fmt.Sprintf("%g", share))
-			}
-			args = append(args, "-ts", strings.Join(parts, ","))
-		}
-		if m.Threads > 0 {
-			args = append(args, "-t", fmt.Sprint(m.Threads))
-		}
-		if m.NCPUMoE > 0 {
-			args = append(args, "--n-cpu-moe", fmt.Sprint(m.NCPUMoE))
-		}
-		// Кэш квантуется на процессе, который собирает ответ: слои этой
-		// стадии остаются на карте. Черновик ngram-mod проверяется здесь же,
-		// одной пачкой. Голова модели подключается только если её файл есть.
+		args = coordinatorServerArgs(m, rpcAddrs)
 		args = append(args, kvCacheArgs(largestVRAM())...)
 		specArgs, specErr := draftSpecArgs(m.DraftGGUFPath, m.SpecType)
 		if specErr != nil {
@@ -972,23 +1076,47 @@ func startMeshRuntime(ctx context.Context, client *Client, m workercfg.Mesh, log
 	} else if m.Tunnel {
 		// Стадия сама идёт на платформу: входящих соединений у неё нет, порт
 		// RPC слушает только loopback.
-		if m.TopologyID == "" || m.SelfWorkerID == "" {
-			rt.stop()
-			return nil, fmt.Errorf("mesh: туннель требует topology_id и self_worker_id")
-		}
-		listener, err := StartMeshTunnelListener(ctx, client, m.TopologyID, m.SelfWorkerID, m.CoordinatorID, rt.endpoint)
-		if err != nil {
+		if err := rt.listenStages(ctx, client, m, log); err != nil {
 			rt.stop()
 			return nil, err
 		}
-		rt.listener = listener
-		log.Info("mesh tunnel listener started",
-			"topology", m.TopologyID, "worker_id", m.SelfWorkerID, "rpc_addr", rt.endpoint)
 	}
 
 	log.Info("mesh runtime ready", "role", m.Role, "endpoint", rt.endpoint,
 		"digest", rt.digest, "elapsed_ms", time.Since(rt.started).Milliseconds())
 	return rt, nil
+}
+
+// listenStages открывает туннель к каждой чужой группе, где этот компьютер
+// держит слои. Пока своего чата нет, RPC один и слушает их все.
+func (r *meshRuntime) listenStages(ctx context.Context, client *Client, fallback workercfg.Mesh, log *slog.Logger) error {
+	stages := CurrentMeshStages()
+	if len(stages) == 0 && fallback.TopologyID != "" && fallback.SelfWorkerID != "" {
+		stages = []ResolvedMesh{{
+			TopologyID:    fallback.TopologyID,
+			SelfWorkerID:  fallback.SelfWorkerID,
+			CoordinatorID: fallback.CoordinatorID,
+		}}
+	}
+	if len(stages) == 0 {
+		return fmt.Errorf("mesh: туннель требует topology_id и self_worker_id")
+	}
+	for _, stage := range stages {
+		if stage.TopologyID == "" || stage.SelfWorkerID == "" {
+			continue
+		}
+		listener, err := StartMeshTunnelListener(ctx, client, stage.TopologyID, stage.SelfWorkerID, stage.CoordinatorID, r.endpoint)
+		if err != nil {
+			return err
+		}
+		r.listeners = append(r.listeners, listener)
+		log.Info("mesh tunnel listener started",
+			"topology", stage.TopologyID, "worker_id", stage.SelfWorkerID, "rpc_addr", r.endpoint)
+	}
+	if len(r.listeners) == 0 {
+		return fmt.Errorf("mesh: туннель требует topology_id и self_worker_id")
+	}
+	return nil
 }
 
 // waitReady ждёт, пока стадия начнёт отвечать, и следит за падением процесса.
@@ -1043,7 +1171,7 @@ func (r *meshRuntime) waitReady(ctx context.Context) error {
 
 		if time.Now().After(deadline) {
 			return fmt.Errorf("mesh runtime did not become ready in %s; %s",
-				meshReadyTimeout, r.tailLast())
+				ready, r.tailLast())
 		}
 		attempts++
 		time.Sleep(500 * time.Millisecond)

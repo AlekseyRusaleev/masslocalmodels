@@ -54,6 +54,11 @@ type meshStream struct {
 	buf    []byte
 	closed bool
 	used   time.Time
+	// ups и downs — сколько потоков сейчас пишут и читают. Когда обоих нет,
+	// буфер прошлого сеанса стирается: иначе новый RPC читает чужие кадры и
+	// llama.cpp отвечает «Remote RPC server crashed or returned malformed response».
+	ups   int
+	downs int
 }
 
 // newMeshStream создаёт буфер.
@@ -79,6 +84,56 @@ func (s *meshStream) write(p []byte) error {
 	s.used = time.Now()
 	s.cond.Broadcast()
 	return nil
+}
+
+// joinUp отмечает нового отправителя. Если пары сейчас нет, прошлые байты
+// выбрасываются: их некому было забрать, а новый сеанс примет их за ответ.
+func (s *meshStream) joinUp() { s.join(true) }
+
+// joinDown отмечает нового получателя. Правило то же, что у отправителя.
+func (s *meshStream) joinDown() { s.join(false) }
+
+// join учитывает сторону. Стирание буфера только когда обе стороны были
+// отключены: байты, которые текущий отправитель уже положил, получатель
+// ещё должен прочитать.
+func (s *meshStream) join(up bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ups == 0 && s.downs == 0 {
+		s.buf = nil
+		s.closed = false
+	}
+	if up {
+		s.ups++
+	} else {
+		s.downs++
+	}
+	s.used = time.Now()
+}
+
+// leaveUp отмечает, что отправитель отключился.
+func (s *meshStream) leaveUp() { s.leave(true) }
+
+// leaveDown отмечает, что получатель отключился.
+func (s *meshStream) leaveDown() { s.leave(false) }
+
+// leave стирает буфер, когда сеанс закончился с обеих сторон.
+func (s *meshStream) leave(up bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if up {
+		if s.ups > 0 {
+			s.ups--
+		}
+	} else if s.downs > 0 {
+		s.downs--
+	}
+	if s.ups == 0 && s.downs == 0 {
+		s.buf = nil
+		s.closed = false
+	}
+	s.used = time.Now()
+	s.cond.Broadcast()
 }
 
 // close сообщает читателю, что данных больше не будет.
@@ -211,9 +266,13 @@ func (cfg Config) registerMeshLinkRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusInternalServerError, "internal", "cannot check topology owners")
 			return
 		}
-		if len(owners) > 1 {
+		// Чужой компьютер может держать слои в автоматической группе: ведущий
+		// там всегда тот, чей чат. Задание при этом забирает только его узел.
+		// Ручную группу из разных владельцев туннель не открывает: иначе
+		// чужой компьютер можно назначить ведущим чужого чата.
+		if len(owners) > 1 && !detail.Topology.Auto {
 			writeError(w, http.StatusForbidden, "mixed_owners",
-				"a private shard group can include only machines of one person")
+				"a hand-made shard group cannot join machines of different people")
 			return
 		}
 		if !workerInTopology(detail, stageID) {
@@ -262,9 +321,11 @@ func (cfg Config) registerMeshLinkRoutes(mux *http.ServeMux) {
 
 // pumpUp принимает поток от отправителя и складывает его в буфер пары.
 func (cfg Config) pumpUp(w http.ResponseWriter, r *http.Request, stream *meshStream, key string) {
-	// Буфер НЕ сбрасывается при завершении потока «вверх»: в нём могут лежать
-	// байты, которые получатель ещё не забрал. Соединение пересоздаётся, а
-	// данные должны дойти; мусор уберёт sweep по простою.
+	// Пока получатель жив, буфер не стирается: он ещё не забрал байты.
+	// Когда отключаются обе стороны, буфер прошлого сеанса не остаётся
+	// следующему — иначе RPC читает чужой кадр и обрывает загрузку.
+	stream.joinUp()
+	defer stream.leaveUp()
 	cfg.Log.Info("mesh stream up", "stage", r.URL.Query().Get("stage"))
 
 	buf := make([]byte, meshChunk)
@@ -296,6 +357,8 @@ func (cfg Config) pumpDown(w http.ResponseWriter, r *http.Request, stream *meshS
 	flush()
 
 	cfg.Log.Info("mesh stream down", "stage", r.URL.Query().Get("stage"))
+	stream.joinDown()
+	defer stream.leaveDown()
 	stream.readTo(r.Context(), w, flush)
 }
 

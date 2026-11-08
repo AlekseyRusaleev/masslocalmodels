@@ -1,6 +1,6 @@
 # How the system works
 
-**This describes what the code does now** (participant program 0.3.7, 7 November 2026).
+**This describes what the code does now** (participant program 0.3.20, 9 November 2026).
 [Русский](how-it-works.md).
 
 The original specification is [`DISTRIBUTED_AI_PLATFORM_PLAN.md`](../DISTRIBUTED_AI_PLATFORM_PLAN.md).
@@ -29,8 +29,8 @@ on its own once two or more such computers are present.
 | What computes | Ollama, every layer on that machine | llama.cpp: `llama-server` on the leader, `ggml-rpc-server` on the others |
 | What is on disk | The whole model file | The same whole file. It is not cut into pieces |
 
-The platform splits only a model whose layer count it knows. Today that is `gpt-oss:20b`:
-24 layers. Every other model has a layer count of zero in the code and stays whole on one computer.
+The platform splits only a model whose layer count it knows. Today that is `qwen2.5:72b-instruct-q4_0`:
+80 layers. Any other model has a layer count of zero in the code and stays whole on one computer.
 
 A group is formed like this:
 
@@ -38,10 +38,9 @@ A group is formed like this:
 2. The heartbeat reports `mesh_capable` and the model name. If the model file and room for a quantized cache fit on its largest card, it also reports `model_fits`.
 3. The control plane looks at nodes that were `available` in the last two minutes, named the same model, and did not report `model_fits`.
 4. Fewer than two such nodes removes the automatic group. A hand-made topology is left alone. A `model_fits` node answers its own requests whole and does not dissolve the group of the others.
-5. Two or more nodes receive continuous ranges. The node with the lowest id leads (`coordinate`). The others only compute their range (`compute`). For 24 layers and two computers that is layers 0–11 and 12–23.
+5. Two or more computers produce one group per person. That person's own computer leads it: it claims the chat and sees the text. Foreign computers in the group only hold layers. A shared account is not required. Layers are split by card size, not evenly: an 8 GB card does not get the same share as a 16 GB card. If a card size is unknown, the pieces stay equal. For 24 layers and two cards of the same size the record gives the leader 0–11 and the foreign computer 12–23.
 
-A node that holds someone else's range **does not answer chat**. The leader claims the chat job.
-While a person's computer is only a stage, that person's own messages are not served from it.
+A foreign computer does not claim the job and does not see the chat text. While its own chat is idle, a computer keeps RPC up so someone else's chat can use its layers. During its own chat RPC stops: one card cannot lead an answer and serve layers at the same time.
 
 ## Path of a request
 
@@ -73,8 +72,10 @@ card. After a successful answer the program stops the llama-server that belongs 
 the card. The next message can go through the layer group. Disconnect, pause, and exit do the
 same thing at once, so the card is free to use. A llama-server started outside this program is left running.
 
-If the group does not start because of memory or the runtime, Ollama answers instead of returning
-that error. An error that says the prompt does not fit the context window is not replaced this way.
+If the group does not start because of memory or the runtime, Ollama answers **only when the file
+fits this card**. A model larger than the card is not loaded whole: that is the same out-of-memory
+failure, not a fallback. An error that says the prompt does not fit the context window is not
+replaced this way.
 
 An unload call to the Ollama API often never returns while its llama-server holds the card. The
 program then stops only `llama-server.exe` and `llama-server-real.exe` under `\Ollama\lib\ollama\`.
@@ -121,10 +122,15 @@ Those names belong to the original plan and the early ADRs. Petals was tried and
 The program sees NVIDIA cards only, through `nvidia-smi`. The only card that has been measured
 is 8 GB (8151 MiB). Nothing below that size has been measured.
 
-Before a layer group starts, the memory check asks for about half the file plus 1 GiB, and never
-more than **6 GiB free** video memory. On an 8 GB card the desktop uses about 1 GB, so 7.6 GiB
-is never free. A start succeeded with 6 GB free and failed with 1.7 GB free while Ollama still
-held the model.
+Before a layer group starts, the memory check asks whether the card is free: about half the file
+plus 1 GiB, never more than **6 GiB free** video memory. That mark means Ollama is no longer
+holding the model, not that the whole file fits. On an 8 GB card the desktop uses about 1 GB.
+A start succeeded with 6 GB free and failed with 1.7 GB free while Ollama still held the model.
+Free RAM uses the same ceiling of **6 GiB**.
+
+llama.cpp `--fit` places layers on the local card, the RPC stages, and RAM if needed. The program
+does not pin GPU layers at 99. That setting stopped llama.cpp from shrinking the layout, and a
+file larger than one card asked the leader for more video memory than the card has.
 
 ## Privacy
 
@@ -133,7 +139,7 @@ An ordinary chat is `private`. Only a node owned by the same person can claim th
 
 Conversation history on the server is ciphertext. The key stays on the person's computer and is
 not sent to the server. The control plane does not write message text to its log.
-The computer that computes the request does see that text. Otherwise it could not compute it.
+The computer that leads the answer sees the chat text. A foreign computer receives the open RPC stream, not the text. Current llama.cpp cannot hide that stream.
 
 ## What the program does by itself
 

@@ -25,6 +25,10 @@ const (
 	meshFrameData byte = 1
 	// meshFrameClose — соединение закрыто, получатель должен закрыть своё.
 	meshFrameClose byte = 2
+	// meshFramePulse — пустой кадр, чтобы поток не засыпал.
+	// Получатель его не передаёт в RPC: иначе пустое соединение заняло бы
+	// единственный сеанс ggml-rpc-server.
+	meshFramePulse byte = 3
 	// meshFrameHeader — длина заголовка кадра.
 	meshFrameHeader = 4 + 8 + 1
 	// meshFrameMax — предел одного кадра. RPC присылает тензоры крупными

@@ -55,6 +55,90 @@ func manifestSignatureValid(pepper []byte, text, signature string) bool {
 	return hmac.Equal([]byte(expected), []byte(strings.ToLower(strings.TrimSpace(signature))))
 }
 
+// ArtifactsComplete — у ревизии есть файлы и у каждого записан полный sha256.
+// Без этого подпись не ставится: публичный узел сверяет свой файл с манифестом
+// и не берёт задание, если сверка невозможна.
+func ArtifactsComplete(artifacts []Artifact) bool {
+	if len(artifacts) == 0 {
+		return false
+	}
+	for _, artifact := range artifacts {
+		digest := NormalizeDigest(artifact.SHA256)
+		if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// ClearRevisionSignature снимает подпись. Файл изменился, а нового хэша ещё нет:
+// старая подпись не должна подтверждать другое содержимое.
+func (s *Store) ClearRevisionSignature(ctx context.Context, revisionID string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE model_revisions SET manifest_signature = '', manifest_signed_at = NULL WHERE id = $1::uuid`,
+		revisionID)
+	if err != nil {
+		return fmt.Errorf("store: clear revision signature: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SignPendingRevisions подписывает готовые ревизии, у которых файлы уже есть,
+// а подпись пустая или не совпадает с текущим манифестом.
+//
+// Регистрация файла и подпись — один шаг. Отдельное напоминание «подпиши потом»
+// уже оставляло задание в очереди: публичный узел не берёт модель без подписи.
+func (s *Store) SignPendingRevisions(ctx context.Context, pepper []byte) (int, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.id::text
+		FROM model_revisions r
+		WHERE r.status IN ('ready', 'active')
+		  AND EXISTS (
+		    SELECT 1 FROM model_artifacts a
+		    WHERE a.revision_id = r.id AND a.sha256 <> ''
+		  )`)
+	if err != nil {
+		return 0, fmt.Errorf("store: list unsigned revisions: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, fmt.Errorf("store: scan revision: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	signed := 0
+	for _, id := range ids {
+		manifest, err := s.ManifestByRevision(ctx, id)
+		if err != nil {
+			return signed, err
+		}
+		if !ArtifactsComplete(manifest.Artifacts) {
+			continue
+		}
+		text := CanonicalManifest(manifest.Revision, manifest.Artifacts)
+		if manifest.Revision.ManifestSignature != "" &&
+			manifestSignatureValid(pepper, text, manifest.Revision.ManifestSignature) {
+			continue
+		}
+		if _, err := s.SignRevision(ctx, pepper, id); err != nil {
+			return signed, err
+		}
+		signed++
+	}
+	return signed, nil
+}
+
 // SignRevision закрепляет текущее содержимое манифеста подписью.
 //
 // Пересчитывается по фактическим данным ревизии и файлов: подписать «что-то

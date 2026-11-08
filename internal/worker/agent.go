@@ -18,7 +18,25 @@ import (
 
 // AgentVersion — версия агента, отправляется при регистрации и в heartbeat.
 // Её же программа сравнивает с release.json на платформе.
-const AgentVersion = "0.3.7"
+const AgentVersion = "0.3.20"
+
+// meshProblem — последняя причина, по которой группа слоёв не поднимается.
+// Хранится для окна программы: участник должен видеть «не хватает 11 ГиБ»,
+// а не пустое окно или ошибку видеокарты.
+var meshProblem atomic.Value // string
+
+// SetMeshProblem запоминает причину отказа группы. Пустая строка — отказов нет.
+func SetMeshProblem(text string) {
+	meshProblem.Store(strings.TrimSpace(text))
+}
+
+// MeshProblem возвращает причину отказа группы, если она известна.
+func MeshProblem() string {
+	if value, ok := meshProblem.Load().(string); ok {
+		return value
+	}
+	return ""
+}
 
 // ActiveJobs — сколько заданий узел выполняет прямо сейчас.
 // Значение уходит в heartbeat, чтобы панель показывала реальную загрузку.
@@ -180,6 +198,11 @@ func Run(ctx context.Context, cfgPath string, once bool, log *slog.Logger) error
 				meta["mesh_model"] = cfg.Model
 			}
 		}
+		if officialLlamaDir() != "" {
+			meta["llama_release"] = llamaRelease
+		} else if findLlamaDir() != "" {
+			meta["llama_release"] = "other"
+		}
 		if mesh := MeshOptionsOf(cfg); mesh != nil {
 			role := mesh.Role
 			if role == meshRoleAuto {
@@ -327,6 +350,17 @@ func Run(ctx context.Context, cfgPath string, once bool, log *slog.Logger) error
 			}
 			log.Info("heartbeat ok", attrs...)
 
+			// Причина отказа группы: пишем только при изменении, иначе
+			// каждые 30 секунд в журнале была бы одна и та же строка.
+			if previous := MeshProblem(); previous != resp.MeshFit {
+				SetMeshProblem(resp.MeshFit)
+				if resp.MeshFit != "" {
+					log.Warn("shard group cannot start", "reason", resp.MeshFit)
+				} else if previous != "" {
+					log.Info("shard group can start again")
+				}
+			}
+
 			if resp.DesiredState == "drain" || resp.DesiredState == "paused" || resp.DesiredState == "quarantined" {
 				log.Warn("control plane requests stop", "desired_state", resp.DesiredState)
 			} else if resp.Weights != nil && (len(resp.Weights.Fetch) > 0 || len(resp.Weights.Release) > 0) {
@@ -346,7 +380,7 @@ func Run(ctx context.Context, cfgPath string, once bool, log *slog.Logger) error
 					)
 				}
 			}
-			if strings.EqualFold(cfg.Model, DefaultChatModel) && (cfg.DraftGGUFPath == "" || !fileExists(cfg.DraftGGUFPath)) {
+			if gptOSS20(cfg.Model) && (cfg.DraftGGUFPath == "" || !fileExists(cfg.DraftGGUFPath)) {
 				go rememberDraftHead(ctx, cfgPath, log)
 			}
 			go followDesiredModel(ctx, cfgPath, cfg.Model, log)
@@ -384,14 +418,27 @@ func rememberDraftHead(ctx context.Context, cfgPath string, log *slog.Logger) {
 		draftPull.mu.Unlock()
 	}()
 
+	if want, err := FetchDesiredModel(ctx, ""); err == nil && want != "" && !gptOSS20(want) {
+		removeDraftHead(workercfg.Config{})
+		return
+	}
+
 	path, err := FetchDraftHead(ctx, nil)
 	if err != nil {
 		log.Warn("draft head was not downloaded", "err", err)
 		return
 	}
+	if want, err := FetchDesiredModel(ctx, ""); err == nil && want != "" && !gptOSS20(want) {
+		_ = os.Remove(path)
+		return
+	}
 	cfg, err := workercfg.Load(cfgPath)
 	if err != nil {
 		log.Warn("cannot store draft head path", "err", err)
+		return
+	}
+	if !gptOSS20(cfg.Model) {
+		_ = os.Remove(path)
 		return
 	}
 	if cfg.DraftGGUFPath == path {
@@ -430,25 +477,107 @@ func followDesiredModel(ctx context.Context, cfgPath, current string, log *slog.
 	if err != nil || want == "" || strings.EqualFold(want, current) {
 		return
 	}
+	log.Info("model changed, freeing disk", "was", current, "model", want)
+	cfg, err := workercfg.Load(cfgPath)
+	if err != nil {
+		log.Warn("cannot read config before model change", "err", err)
+		return
+	}
+	// 41 ГБ новой модели не влезают, пока на диске лежат прежние веса и голова.
+	// Голова обучена только на gpt-oss:20b и к другой модели не подходит.
+	if !gptOSS20(want) {
+		removeDraftHead(cfg)
+		cfg.DraftGGUFPath = ""
+		if cfg.Mesh != nil {
+			cfg.Mesh.DraftGGUFPath = ""
+			if cfg.Mesh.SpecType == DefaultDraftSpec {
+				cfg.Mesh.SpecType = ""
+			}
+		}
+		if err := workercfg.Save(cfgPath, cfg); err != nil {
+			log.Warn("cannot clear draft head path", "err", err)
+		}
+	}
+	if current != "" && !strings.EqualFold(current, want) {
+		if err := OllamaDelete(ctx, current); err != nil {
+			log.Warn("old model was not deleted", "model", current, "err", err)
+		} else {
+			log.Info("old model deleted", "model", current)
+		}
+	}
 	log.Info("model changed, downloading weights", "model", want)
 	if err := OllamaPullWithProgress(ctx, want, nil); err != nil {
 		log.Warn("model was not downloaded", "model", want, "err", err)
 		return
 	}
-	cfg, err := workercfg.Load(cfgPath)
+	cfg, err = workercfg.Load(cfgPath)
 	if err != nil {
 		log.Warn("cannot store new model", "err", err)
 		return
 	}
 	cfg.Model = want
-	if !strings.EqualFold(want, DefaultChatModel) {
+	if !gptOSS20(want) {
+		removeDraftHead(cfg)
 		cfg.DraftGGUFPath = ""
+		if cfg.Mesh != nil {
+			cfg.Mesh.DraftGGUFPath = ""
+			if cfg.Mesh.SpecType == DefaultDraftSpec {
+				cfg.Mesh.SpecType = ""
+			}
+		}
 	}
 	if err := workercfg.Save(cfgPath, cfg); err != nil {
 		log.Warn("cannot store new model", "err", err)
 		return
 	}
+	rewriteConnectionModel(cfgPath, current, want)
 	log.Info("model is ready", "model", want)
+}
+
+func gptOSS20(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == "gpt-oss:20b" || model == "gpt-oss:20b:latest"
+}
+
+// rewriteConnectionModel меняет имя модели в памятке для харнеса.
+// Окно берёт поле «Модель» оттуда, и без этой правки там остаётся старое имя.
+func rewriteConnectionModel(cfgPath, from, to string) {
+	from = strings.TrimSpace(from)
+	to = strings.TrimSpace(to)
+	if from == "" || to == "" || strings.EqualFold(from, to) {
+		return
+	}
+	path := filepath.Join(filepath.Dir(cfgPath), "connection.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	updated := strings.ReplaceAll(string(data), from, to)
+	if updated == string(data) {
+		return
+	}
+	_ = os.WriteFile(path, []byte(updated), 0o644)
+}
+
+// removeDraftHead стирает файл головы. Он нужен только gpt-oss:20b и занимает место,
+// без которого более крупная модель не скачается.
+func removeDraftHead(cfg workercfg.Config) {
+	paths := []string{strings.TrimSpace(cfg.DraftGGUFPath)}
+	if dir := workercfg.DefaultModelDir(); dir != "" {
+		paths = append(paths, filepath.Join(dir, DefaultDraftName))
+	}
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		_ = os.Remove(path)
+		_ = os.Remove(path + ".part")
+		for i := 0; i < 16; i++ {
+			_ = os.Remove(fmt.Sprintf("%s.part.chunk-%02d", path, i))
+		}
+	}
 }
 
 func fileExists(path string) bool {

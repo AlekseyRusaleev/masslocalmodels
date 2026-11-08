@@ -449,6 +449,15 @@ tbody tr:hover {
 
 /* ---------- статистика ---------- */
 
+.panel > summary.panel-head {
+  cursor: pointer;
+  list-style: none;
+}
+
+.panel > summary.panel-head::-webkit-details-marker {
+  display: none;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

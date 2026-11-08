@@ -537,6 +537,40 @@ func setFieldText(hwnd uintptr, text string) {
 	procSetWindowText.Call(hwnd, uintptr(unsafe.Pointer(utf16Ptr(text))))
 }
 
+var lastShownModelCheck time.Time
+
+// refreshShownModel подставляет в поле «Модель» имя из конфигурации узла.
+// Памятка подключения пишется при регистрации и сама не следит за сменой модели.
+func refreshShownModel() {
+	if time.Since(lastShownModelCheck) < 2*time.Second {
+		return
+	}
+	lastShownModelCheck = time.Now()
+	state.mu.Lock()
+	path := state.config
+	state.mu.Unlock()
+	if path == "" {
+		path = defaultConfigPath()
+	}
+	cfg, err := workercfg.Load(path)
+	if err != nil {
+		return
+	}
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		return
+	}
+	state.mu.Lock()
+	changed := state.harnessModel != model
+	if changed {
+		state.harnessModel = model
+	}
+	state.mu.Unlock()
+	if changed {
+		state.log("модель: " + model)
+	}
+}
+
 func tryLoadConnectionNote() {
 	path := filepath.Join(filepath.Dir(defaultConfigPath()), "connection.txt")
 	data, err := os.ReadFile(path)
@@ -949,14 +983,7 @@ func resumeExistingNode(hwnd uintptr) bool {
 	state.status = "узел подключён"
 	state.mu.Unlock()
 	state.log("узел уже зарегистрирован, ключ API не меняется")
-	go func() {
-		if _, err := worker.EnsureLlama(context.Background(), worker.EnsureLlamaOptions{
-			Log:      state.log,
-			Progress: state.progress,
-		}); err != nil {
-			state.log("llama.cpp не установлена: " + err.Error())
-		}
-	}()
+	ensureOfficialLlama()
 	if err := startAgent(cfgPath, cfg.Model); err != nil {
 		state.log(err.Error())
 	}
@@ -1243,6 +1270,7 @@ func onCreate(hwnd uintptr) {
 				model = cfg.Model
 			}
 			state.log(fmt.Sprintf("окно контекста: %d токенов", worker.NumCtxOf(cfg)))
+			ensureOfficialLlama()
 			if err := startAgent(argConfig, model); err != nil {
 				state.log(err.Error())
 			}
@@ -1412,9 +1440,40 @@ func resumeIfEnrolled() {
 	state.finished = true
 	state.status = "узел подключён"
 	state.mu.Unlock()
+	ensureOfficialLlama()
 	if err := startAgent(path, cfg.Model); err != nil {
 		state.log(err.Error())
 	}
+}
+
+// ensureOfficialLlama ставит закреплённую сборку llama.cpp в фоне.
+// Обычный запуск окна и тихий перезапуск после обновления идут мимо кнопки
+// подключения, поэтому без этого вызова чужой компьютер так и остаётся
+// на старом ggml-rpc-server.
+func ensureOfficialLlama() {
+	go func() {
+		_, err := worker.EnsureLlama(context.Background(), worker.EnsureLlamaOptions{
+			Log:      state.log,
+			Progress: state.progress,
+		})
+		if err != nil {
+			state.log("llama.cpp не установлена: " + err.Error())
+			state.progress(0, "llama.cpp не установлена")
+			return
+		}
+		// Последний кадр закачки — «100%». Без этого шага полоса так и висит,
+		// хотя журнал уже записал, что сборка установлена.
+		state.mu.Lock()
+		status := state.status
+		state.mu.Unlock()
+		if strings.HasPrefix(status, "скачиваю llama.cpp") || strings.HasPrefix(status, "скачиваю CUDA для llama.cpp") {
+			done := "узел подключён"
+			if argRun {
+				done = "узел работает в трее"
+			}
+			state.progress(0, done)
+		}
+	}()
 }
 
 func startUpdate(hwnd uintptr) {
@@ -1453,12 +1512,26 @@ func startUpdate(hwnd uintptr) {
 // Вызывается по таймеру четыре раза в секунду, поэтому здесь нельзя делать
 // ничего дорогого: перезапись журнала только при изменении, обращение к файлу
 // конфигурации — не чаще раза в две секунды, обновление трея — тоже.
+// lastMeshProblem — последняя показанная причина отказа группы: в журнал окна
+// пишем только при изменении, иначе таймер повторял бы строку четыре раза в
+// секунду.
+var lastMeshProblem string
+
 func refreshUI() {
+	if problem := worker.MeshProblem(); problem != lastMeshProblem {
+		lastMeshProblem = problem
+		if problem != "" {
+			state.log("группа слоёв не поднимается: " + problem)
+		} else {
+			state.log("слои снова можно разложить по компьютерам")
+		}
+	}
+
 	percent, status, logText, busy, finished, failed, _, _ := state.snapshot()
 
 	procSetWindowText.Call(stateStatus, uintptr(unsafe.Pointer(utf16Ptr(status))))
 	procSendMessage.Call(stateBar, pbmSetPos, uintptr(percent), 0)
-	if weightStatus != 0 && time.Since(lastWeightScan) >= 2*time.Second {
+	if weightStatus != 0 && !modelPullVisible && time.Since(lastWeightScan) >= 2*time.Second {
 		lastWeightScan = time.Now()
 		text := formatWeight(worker.DownloadedWeightBytes())
 		if text != lastWeightText {
@@ -1467,6 +1540,7 @@ func refreshUI() {
 		}
 	}
 	applyDraftProgress()
+	applyModelPullProgress()
 
 	updateMu.Lock()
 	known, version := updateKnown, updateOffer.Version
@@ -1482,6 +1556,7 @@ func refreshUI() {
 		procSetWindowText.Call(logBox, uintptr(unsafe.Pointer(utf16Ptr(logText))))
 	}
 
+	refreshShownModel()
 	apiType, baseURL, model, apiKey := state.harnessFields()
 	if apiType != lastHarnessType {
 		lastHarnessType = apiType
@@ -1540,9 +1615,10 @@ var (
 )
 
 var (
-	draftAnnounced bool
-	draftFinished  bool
-	lastDraftScan  time.Time
+	draftAnnounced   bool
+	draftFinished    bool
+	lastDraftScan    time.Time
+	modelPullVisible bool
 )
 
 // applyDraftProgress двигает полоску по байтам, которые уже лежат на диске.
@@ -1584,6 +1660,54 @@ func applyDraftProgress() {
 		state.log("голова черновика скачана")
 		procSetWindowText.Call(stateStatus, uintptr(unsafe.Pointer(utf16Ptr("голова черновика скачана"))))
 		procSendMessage.Call(stateBar, pbmSetPos, 100, 0)
+		return
+	}
+	if draftAnnounced && !draftFinished {
+		draftAnnounced = false
+		done := "узел подключён"
+		if argRun {
+			done = "узел работает в трее"
+		}
+		state.progress(0, done)
+	}
+}
+
+// applyModelPullProgress заполняет полосу по байтам, которые уже лежат на диске.
+// Длина недокачанного файла равна всей модели, поэтому на неё смотреть нельзя.
+func applyModelPullProgress() {
+	done, total, active := worker.ModelDownloadProgress()
+	if !active {
+		if modelPullVisible {
+			modelPullVisible = false
+			text := "узел подключён"
+			if argRun {
+				text = "узел работает в трее"
+			}
+			state.progress(0, text)
+		}
+		return
+	}
+	if !modelPullVisible {
+		state.log("скачиваю модель")
+	}
+	modelPullVisible = true
+	pct := int(done * 100 / total)
+	if pct > 99 {
+		pct = 99
+	}
+	if pct < 1 {
+		pct = 1
+	}
+	text := fmt.Sprintf("скачиваю модель: %d%% · %s из %s", pct, formatWeight(done), formatWeight(total))
+	state.progress(pct, text)
+	procSetWindowText.Call(stateStatus, uintptr(unsafe.Pointer(utf16Ptr(text))))
+	procSendMessage.Call(stateBar, pbmSetPos, uintptr(pct), 0)
+	if weightStatus != 0 {
+		weight := formatWeight(done) + " из " + formatWeight(total)
+		if weight != lastWeightText {
+			lastWeightText = weight
+			procSetWindowText.Call(weightStatus, uintptr(unsafe.Pointer(utf16Ptr(weight))))
+		}
 	}
 }
 

@@ -218,6 +218,18 @@ func (cfg Config) registerWorkerRoutes(mux *http.ServeMux) {
 			}
 		}
 
+		// Причина, по которой группа для этой модели не собирается. Узел
+		// пишет её в журнал и в окно: «не хватает N ГиБ» полезнее, чем
+		// падение на cudaMalloc.
+		meshFit := ""
+		if capable, _ := body.Meta["mesh_capable"].(bool); capable {
+			if model, _ := body.Meta["mesh_model"].(string); strings.TrimSpace(model) != "" {
+				if text, refusalErr := cfg.Store.LatestSplitRefusal(r.Context(), model); refusalErr == nil {
+					meshFit = text
+				}
+			}
+		}
+
 		plan, planErr := cfg.weightPlan(r.Context(), wp.Worker.ID)
 		cfg.logWeightPlanError(planErr)
 
@@ -230,6 +242,9 @@ func (cfg Config) registerWorkerRoutes(mux *http.ServeMux) {
 		}
 		if plan != nil {
 			reply["weights"] = plan
+		}
+		if meshFit != "" {
+			reply["mesh_fit"] = meshFit
 		}
 		writeJSON(w, http.StatusOK, reply)
 	}))

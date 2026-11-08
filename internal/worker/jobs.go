@@ -705,34 +705,34 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 		case wholeModelFits(model):
 			result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
 		case mesh != nil && mesh.Role == meshRoleAuto:
-			// Группы ещё нет — отвечаем моделью целиком. Когда платформа
-			// назначит этого узла координатором, чат пойдёт через слои.
+			// План приходит с платформы отдельным запросом. Пока его нет,
+			// локальную модель не трогаем: задание в первую секунду после
+			// старта иначе грузит целиком файл, который в карту не входит.
+			if _, ok := CurrentMeshPlan(); !ok {
+				if _, err := RefreshMeshPlan(ctx, client, cfg); err != nil {
+					result = localOrShardError(ctx, client, job, model, NumCtxOf(cfg), log,
+						"shard group is not assigned", err.Error())
+					break
+				}
+			}
 			stage, err := MeshForJob(cfg)
 			if err != nil {
 				if plan, ok := CurrentMeshPlan(); ok && plan.Role == meshRoleCompute {
 					result = JobResult{Error: "этот узел держит слои и не отвечает на чат сам"}
 					break
 				}
-				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
-				break
-			}
-			// Модель уже в памяти и может ответить. Снимать её до ответа
-			// нельзя: прошлый раз из-за этого запрос оборвался, хотя ответ
-			// был готов. После ответа карта освобождается сама, и следующее
-			// сообщение идёт через группу слоёв.
-			if ollamaHasModel(ctx, model) {
-				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
-				if result.Error == "" {
-					if stopped := stopOllamaModelServers(); stopped > 0 {
-						log.Info("local model stopped after the answer, next request uses the layer group", "processes", stopped)
-					}
+				if plan, ok := CurrentMeshPlan(); ok && plan.Role == meshRoleCoordinator {
+					result = JobResult{Error: "shard group not ready: " + err.Error()}
+					break
 				}
+				result = localOrShardError(ctx, client, job, model, NumCtxOf(cfg), log,
+					"shard group not ready", err.Error())
 				break
 			}
 			result = RunMeshChatJob(ctx, client, job, stage, cfg.NumCtx, log)
 			if result.Error != "" && meshCanFallBack(result.Error) {
-				log.Warn("shard group did not start, answering with the local model", "err", result.Error)
-				result = RunChatJob(ctx, client, job, model, NumCtxOf(cfg), log)
+				result = localOrShardError(ctx, client, job, model, NumCtxOf(cfg), log,
+					"shard group did not start", result.Error)
 			}
 		case mesh != nil:
 			stage, err := MeshForJob(cfg)
@@ -755,14 +755,28 @@ func ServeJobs(ctx context.Context, cfgPath string, model string, log *slog.Logg
 	}
 }
 
+// localOrShardError отвечает локальной моделью только если файл влезает на карту.
+// Иначе Ollama пытается загрузить весь GGUF (для 72B это ~40 ГБ) и падает
+// после того, как группа слоёв уже не стартовала. Это не запасной путь.
+func localOrShardError(ctx context.Context, client *Client, job *Job, model string, numCtx int, log *slog.Logger, why, detail string) JobResult {
+	if wholeModelFits(model) {
+		log.Warn(why+", answering with the local model", "err", detail)
+		return RunChatJob(ctx, client, job, model, numCtx, log)
+	}
+	log.Warn(why+", model does not fit this card", "err", detail)
+	return JobResult{Error: why + ": " + detail}
+}
+
 // meshCanFallBack — группа слоёв не стартовала, но локальная модель может ответить.
 // Ошибка размера промпта сюда не входит: её повтор через Ollama ничего не исправит.
 func meshCanFallBack(err string) bool {
 	text := strings.ToLower(err)
-	if strings.Contains(text, "context window") {
+	// Памяти не хватило группе слоёв — локальной копии нужно ещё больше.
+	// Прошлый такой откат молчал до обрыва клиента и карту не освобождал.
+	if strings.Contains(text, "context window") || strings.Contains(text, "insufficient") ||
+		strings.Contains(text, "did not become ready") {
 		return false
 	}
-	return strings.Contains(text, "insufficient") ||
-		strings.Contains(text, "shard group unavailable") ||
+	return strings.Contains(text, "shard group unavailable") ||
 		strings.Contains(text, "shard runtime")
 }

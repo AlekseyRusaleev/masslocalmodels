@@ -26,9 +26,15 @@ func TestModelNamesMatchTag(t *testing.T) {
 	}
 }
 
-func TestMeshFallsBackWhenTheCardIsBusy(t *testing.T) {
-	if !meshCanFallBack("shard group unavailable: insufficient GPU memory") {
-		t.Fatal("занятая карта должна привести к ответу локальной моделью")
+func TestMeshDoesNotHideAMemoryRefusal(t *testing.T) {
+	if meshCanFallBack("shard group unavailable: insufficient GPU memory") {
+		t.Fatal("нехватка памяти не должна уводить ответ в локальную модель")
+	}
+	if meshCanFallBack("mesh runtime did not become ready in 45m0s; no output") {
+		t.Fatal("молчащая группа не должна уводить ответ в локальную модель")
+	}
+	if !meshCanFallBack("shard runtime unavailable: connection refused") {
+		t.Fatal("сбой запуска рантайма всё ещё можно закрыть локальной моделью")
 	}
 	if meshCanFallBack("prompt does not fit the shard-group context window: at least 9 tokens against 4") {
 		t.Fatal("длинный промпт нельзя тихо перекладывать")

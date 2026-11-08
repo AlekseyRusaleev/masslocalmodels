@@ -105,8 +105,11 @@ func (s *stream) outcome() store.JobResult {
 const (
 	// pullTimeout — сколько узел ждёт задание в long-poll.
 	pullTimeout = 25 * time.Second
-	// chatTimeout — предел ожидания ответа модели.
-	chatTimeout = 10 * time.Minute
+	// chatTimeout — сколько клиент ждёт ответ.
+	// Компьютер человека почти всегда за VPN, сервер стоит в России, и загрузка
+	// большой модели по этому пути молчит дольше десяти минут. Короткий обрыв
+	// закрывал запрос раньше, чем узел успевал поднять слои.
+	chatTimeout = 2*time.Hour + 10*time.Minute
 	// servingWindow — сколько живёт заявка узла «я обслуживаю эту модель».
 	// Три heartbeat подряд: короткий сбой связи не убирает модель из каталога.
 	servingWindow = 3 * time.Minute

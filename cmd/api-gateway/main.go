@@ -100,6 +100,12 @@ func runServe(logger *slog.Logger) {
 	}
 	defer db.Close()
 
+	if n, err := db.SignPendingRevisions(ctx, pepper); err != nil {
+		logger.Error("cannot sign model manifests", "err", err)
+	} else if n > 0 {
+		logger.Info("model manifests signed", "count", n)
+	}
+
 	cfg := httpapi.Config{
 		Addr:      env("LISTEN_ADDR", "127.0.0.1:8080"),
 		Version:   version,
@@ -109,11 +115,11 @@ func runServe(logger *slog.Logger) {
 		Log:       logger,
 		StartedAt: time.Now(),
 		// Ограничение частоты: защита от того, что один ключ займёт все узлы.
-		RateLimiter:   httpapi.NewRateLimiter(envInt("CHAT_RATE_PER_MINUTE", 60), envInt("CHAT_RATE_BURST", 10)),
-		EnrollLimiter: httpapi.NewRateLimiter(envInt("ENROLL_RATE_PER_MINUTE", 10), 3),
-		ControlURL:    env("PUBLIC_URL", "https://api.nshno.tech"),
-		JoinCode:         os.Getenv("JOIN_CODE"),
-		AllowOpenEnroll:  os.Getenv("ALLOW_OPEN_ENROLL") == "1",
+		RateLimiter:     httpapi.NewRateLimiter(envInt("CHAT_RATE_PER_MINUTE", 60), envInt("CHAT_RATE_BURST", 10)),
+		EnrollLimiter:   httpapi.NewRateLimiter(envInt("ENROLL_RATE_PER_MINUTE", 10), 3),
+		ControlURL:      env("PUBLIC_URL", "https://api.nshno.tech"),
+		JoinCode:        os.Getenv("JOIN_CODE"),
+		AllowOpenEnroll: os.Getenv("ALLOW_OPEN_ENROLL") == "1",
 	}
 
 	server := &http.Server{

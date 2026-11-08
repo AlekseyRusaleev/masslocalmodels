@@ -243,28 +243,29 @@ func SelfRegister(ctx context.Context, opts SelfRegisterOptions) (SelfRegisterRe
 			}
 			result.Pulled = true
 		}
-		progress(0, "скачиваю голову черновика")
-		logf("скачиваю голову черновика")
-		draft, err := FetchDraftHead(ctx, func(done, total int64) {
-			if total <= 0 {
-				return
+		if gptOSS20(body.Model) {
+			progress(0, "скачиваю голову черновика")
+			logf("скачиваю голову черновика")
+			draft, err := FetchDraftHead(ctx, func(done, total int64) {
+				if total <= 0 {
+					return
+				}
+				pct := done * 100 / total
+				if pct > 99 {
+					pct = 99
+				}
+				progress(int(pct), fmt.Sprintf("голова черновика: %d%%", pct))
+			})
+			if err != nil {
+				logf("голова черновика не скачана: %v", err)
+			} else if cfg, loadErr := workercfg.Load(opts.ConfigPath); loadErr == nil {
+				cfg.DraftGGUFPath = draft
+				if saveErr := workercfg.Save(opts.ConfigPath, cfg); saveErr != nil {
+					logf("путь головы не записан: %v", saveErr)
+				} else {
+					logf("голова черновика: %s", draft)
+				}
 			}
-			pct := done * 100 / total
-			if pct > 99 {
-				pct = 99
-			}
-			progress(int(pct), fmt.Sprintf("голова черновика: %d%%", pct))
-		})
-		if err != nil {
-			logf("голова черновика не скачана: %v", err)
-		} else {
-			cfg.DraftGGUFPath = draft
-			if err := workercfg.Save(opts.ConfigPath, cfg); err != nil {
-				logf("не удалось запомнить путь головы: %v", err)
-			} else {
-				result.Config = cfg
-			}
-			logf("голова черновика: %s", draft)
 		}
 	}
 

@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -101,7 +103,18 @@ func (cfg Config) registerModelRoutes(mux *http.ServeMux) {
 			saved = append(saved, artifact)
 		}
 
-		writeJSON(w, http.StatusCreated, map[string]any{"object": "list", "data": saved})
+		// Файл и подпись ставятся вместе. Отдельный вызов /sign забывался,
+		// и публичный узел не брал задание: подписи у ревизии не было.
+		signed, err := cfg.sealRevision(r.Context(), revisionID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "cannot sign revision")
+			return
+		}
+		response := map[string]any{"object": "list", "data": saved, "signed": signed}
+		if !signed {
+			response["warning"] = "revision is not signed: each file needs a sha256 before a public node can claim it"
+		}
+		writeJSON(w, http.StatusCreated, response)
 	}))
 
 	mux.Handle("GET /admin/v1/models", cfg.requireAuth("admin", func(w http.ResponseWriter, r *http.Request, _ principal) {
@@ -154,7 +167,7 @@ func (cfg Config) registerModelRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"revision_id": revisionID,
-			"signature":   signature,
+			"signed":      signature != "",
 			"signed_at":   time.Now().UTC(),
 		})
 	}))
@@ -183,4 +196,26 @@ func (cfg Config) registerModelRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, http.StatusOK, manifest)
 	}))
+}
+
+// sealRevision подписывает ревизию сразу после записи файлов.
+// Неполный хэш подпись снимает: иначе старая подпись подтверждала бы другой файл.
+func (cfg Config) sealRevision(ctx context.Context, revisionID string) (bool, error) {
+	if len(cfg.Pepper) < 32 {
+		return false, fmt.Errorf("platform key is not configured")
+	}
+	manifest, err := cfg.Store.ManifestByRevision(ctx, revisionID)
+	if err != nil {
+		return false, err
+	}
+	if !store.ArtifactsComplete(manifest.Artifacts) {
+		if err := cfg.Store.ClearRevisionSignature(ctx, revisionID); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if _, err := cfg.Store.SignRevision(ctx, cfg.Pepper, revisionID); err != nil {
+		return false, err
+	}
+	return true, nil
 }

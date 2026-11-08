@@ -19,9 +19,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,8 +90,8 @@ func (p *meshPipe) runUp(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err != nil && p.log != nil {
-			_ = p.log()
+		if err != nil {
+			p.note(err)
 		}
 		select {
 		case <-ctx.Done():
@@ -105,7 +107,12 @@ func (p *meshPipe) upOnce(ctx context.Context, backlog *[]meshFrame) error {
 	writeErr := make(chan error, 1)
 
 	go func() {
+		defer writer.Close()
 		writeErr <- func() error {
+			// Пульс не даёт прокси закрыть молчащее тело и будит запись,
+			// если соединение уже оборвано: иначе повторный поток не откроется.
+			pulse := time.NewTicker(20 * time.Second)
+			defer pulse.Stop()
 			for {
 				var frame meshFrame
 				if len(*backlog) > 0 {
@@ -116,9 +123,14 @@ func (p *meshPipe) upOnce(ctx context.Context, backlog *[]meshFrame) error {
 					case <-ctx.Done():
 						return ctx.Err()
 					case frame = <-p.frames:
+					case <-pulse.C:
+						frame = meshFrame{kind: meshFramePulse}
 					}
 				}
 				if err := writeMeshFrame(writer, frame.id, frame.kind, frame.payload); err != nil {
+					if frame.kind == meshFramePulse {
+						return err
+					}
 					// Возвращаем кадр в начало очереди: он ещё не доставлен.
 					*backlog = append([]meshFrame{frame}, *backlog...)
 					return err
@@ -148,7 +160,8 @@ func (p *meshPipe) upOnce(ctx context.Context, backlog *[]meshFrame) error {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<12))
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("mesh up: http %d", resp.StatusCode)
+		text, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return fmt.Errorf("mesh up: http %d: %s", resp.StatusCode, strings.TrimSpace(string(text)))
 	}
 	return nil
 }
@@ -159,8 +172,12 @@ func (p *meshPipe) runDown(ctx context.Context, handle func(meshFrame) error) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := p.downOnce(ctx, handle); err != nil && p.log != nil {
-			_ = p.log()
+		err := p.downOnce(ctx, handle)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			p.note(err)
 		}
 		select {
 		case <-ctx.Done():
@@ -190,13 +207,26 @@ func (p *meshPipe) downOnce(ctx context.Context, handle func(meshFrame) error) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<12))
-		return fmt.Errorf("mesh down: http %d", resp.StatusCode)
+		text, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return fmt.Errorf("mesh down: http %d: %s", resp.StatusCode, strings.TrimSpace(string(text)))
 	}
 
 	return readMeshFrames(bufio.NewReaderSize(resp.Body, 64<<10), func(id uint64, kind byte, payload []byte) error {
 		return handle(meshFrame{id: id, kind: kind, payload: payload})
 	})
+}
+
+// note пишет отказ туннеля в журнал и закрывает локальные соединения.
+// Раньше текст ответа выбрасывался, и отказ платформы выглядел как молчание.
+func (p *meshPipe) note(err error) {
+	if err == nil || p == nil {
+		return
+	}
+	slog.Warn("mesh tunnel stream failed",
+		"err", err.Error(), "topology", p.topologyID, "stage", p.stageID, "to", p.to)
+	if p.log != nil {
+		_ = p.log()
+	}
 }
 
 // MeshTunnelDialer — локальный порт, ведущий к стадии через платформу.
@@ -300,6 +330,9 @@ func StartMeshTunnelDialer(ctx context.Context, client *Client, topologyID, stag
 					delete(dialer.conns, frame.id)
 					dialer.mu.Unlock()
 				}
+				return nil
+			}
+			if frame.kind != meshFrameData {
 				return nil
 			}
 			if conn == nil {
@@ -458,6 +491,9 @@ func (l *MeshTunnelListener) dispatch(ctx context.Context, frame meshFrame, loca
 			l.mu.Unlock()
 			return conn.Close()
 		}
+		return nil
+	}
+	if frame.kind != meshFrameData {
 		return nil
 	}
 

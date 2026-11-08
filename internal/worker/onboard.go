@@ -162,22 +162,24 @@ func Onboard(ctx context.Context, opts OnboardOptions) (OnboardResult, error) {
 			hasModel = true
 		}
 		result.ModelReady = hasModel
-		progress(0, "скачиваю голову черновика")
-		logf("скачиваю голову черновика")
-		if draft, err := FetchDraftHead(ctx, func(done, total int64) {
-			if total <= 0 {
-				return
+		if gptOSS20(model) {
+			progress(0, "скачиваю голову черновика")
+			logf("скачиваю голову черновика")
+			if draft, err := FetchDraftHead(ctx, func(done, total int64) {
+				if total <= 0 {
+					return
+				}
+				pct := done * 100 / total
+				if pct > 99 {
+					pct = 99
+				}
+				progress(int(pct), fmt.Sprintf("голова черновика: %d%%", pct))
+			}); err != nil {
+				logf("голова черновика не скачана: %v", err)
+			} else {
+				logf("голова черновика: %s", draft)
+				result.Config.DraftGGUFPath = draft
 			}
-			pct := done * 100 / total
-			if pct > 99 {
-				pct = 99
-			}
-			progress(int(pct), fmt.Sprintf("голова черновика: %d%%", pct))
-		}); err != nil {
-			logf("голова черновика не скачана: %v", err)
-		} else {
-			logf("голова черновика: %s", draft)
-			result.Config.DraftGGUFPath = draft
 		}
 		progress(60, "модель готова")
 	} else {

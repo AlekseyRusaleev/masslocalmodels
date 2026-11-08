@@ -465,7 +465,7 @@ func OllamaPull(ctx context.Context, model string) error {
 func OllamaPullWithProgress(ctx context.Context, model string, report func(PullProgress)) error {
 	payload, _ := json.Marshal(map[string]any{"model": model, "stream": true})
 
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Minute)
+	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Hour)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, OllamaEndpoint+"/api/pull", bytes.NewReader(payload))
@@ -520,4 +520,47 @@ func OllamaPullWithProgress(ctx context.Context, model string, report func(PullP
 			return fmt.Errorf("pull stream: %w", readErr)
 		}
 	}
+}
+
+// OllamaDelete убирает модель из локального рантайма вместе с её файлом весов.
+// Отсутствие модели не считается ошибкой: диск уже свободен.
+func OllamaDelete(ctx context.Context, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]string{"name": model, "model": model})
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodDelete, OllamaEndpoint+"/api/delete", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		req, err = http.NewRequestWithContext(reqCtx, http.MethodPost, OllamaEndpoint+"/api/delete", bytes.NewReader(payload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err = http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		raw, _ = io.ReadAll(io.LimitReader(resp.Body, 2048))
+	}
+	if resp.StatusCode == http.StatusNotFound || strings.Contains(strings.ToLower(string(raw)), "not found") {
+		return nil
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("runtime http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
 }

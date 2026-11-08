@@ -8,6 +8,8 @@ import {
   formatSince,
   formatSpeed,
   formatTokens,
+  isConnected,
+  participantCounts,
   setWorkerState,
   setWorkerTrust,
   stateLabels,
@@ -106,20 +108,19 @@ export function NodesPage() {
     }
   };
 
-  const totalVRAM = workers.reduce((sum, worker) => sum + worker.gpu_vram_bytes, 0);
-  const totalGPUs = workers.reduce((sum, worker) => sum + worker.gpu_count, 0);
-  const online = workers.filter((worker) => worker.last_heartbeat_at).length;
-  const activeJobs = workers.reduce((sum, worker) => sum + (worker.active_jobs ?? 0), 0);
-  const jobsDone = workers.reduce((sum, worker) => sum + worker.jobs_done, 0);
+  const { total: participants, online: participantsOnline } = participantCounts(workers);
+  const connected = workers.filter((worker) => isConnected(worker));
+  const stale = workers.filter((worker) => !isConnected(worker));
 
   return (
     <>
       <header className="page-head">
         <div>
-          <h1 className="page-title">Узлы</h1>
+          <h1 className="page-title">Участники</h1>
           <p className="page-subtitle">
-            Компьютеры участников и их телеметрия. Состояние меняется здесь и применяется на узле при следующем
-            heartbeat.
+            Участник — человек с зарегистрированным компьютером. В сети он считается, пока его программа присылает
+            heartbeat: окно те же две минуты, за которые платформа собирает группу слоёв. Старые регистрации в эти
+            числа не входят.
           </p>
         </div>
         <button className="button" onClick={() => void load()} disabled={status === "loading"}>
@@ -130,31 +131,21 @@ export function NodesPage() {
 
       <section className="stat-row">
         <div className="stat">
-          <span className="stat-label">Узлов всего</span>
-          <span className="stat-value">{workers.length}</span>
-          <span className="stat-note">{online} с heartbeat</span>
+          <span className="stat-label">Участников всего</span>
+          <span className="stat-value">{participants}</span>
+          <span className="stat-note">разные аккаунты, когда-либо подключавшие компьютер</span>
         </div>
         <div className="stat">
-          <span className="stat-label">GPU</span>
-          <span className="stat-value">{totalGPUs}</span>
-          <span className="stat-note">видеокарт в сети</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">VRAM суммарно</span>
-          <span className="stat-value">{formatGB(totalVRAM)}</span>
-          <span className="stat-note">по зарегистрированным узлам</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">Задания сейчас</span>
-          <span className="stat-value">{activeJobs}</span>
-          <span className="stat-note">всего выполнено: {jobsDone}</span>
+          <span className="stat-label">В сети сейчас</span>
+          <span className="stat-value">{participantsOnline}</span>
+          <span className="stat-note">heartbeat за последние 2 минуты</span>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Зарегистрированные узлы</h2>
-          <span className="muted num">{workers.length}</span>
+          <h2 className="panel-title">Сейчас в сети</h2>
+          <span className="muted num">{connected.length}</span>
         </div>
 
         {status === "error" && (
@@ -167,18 +158,16 @@ export function NodesPage() {
           </div>
         )}
 
-        {status !== "error" && workers.length === 0 && (
+        {status !== "error" && connected.length === 0 && (
           <div className="notice">
-            <h3 className="notice-title">Узлов пока нет</h3>
+            <h3 className="notice-title">Сейчас никто не в сети</h3>
             <p className="notice-text">
-              Подключите компьютер: выпустите enrollment-токен, затем на машине выполните
-              <span className="num"> compute-node join</span> и
-              <span className="num"> compute-node run --model ...</span>.
+              Компьютер попадает сюда, когда его программа запущена и за последние две минуты прислала heartbeat.
             </p>
           </div>
         )}
 
-        {workers.length > 0 && (
+        {connected.length > 0 && (
           <div className="table-scroll">
             <table>
               <thead>
@@ -199,7 +188,7 @@ export function NodesPage() {
                 </tr>
               </thead>
               <tbody>
-                {workers.map((worker) => {
+                {connected.map((worker) => {
                   const busy = pending === worker.id;
                   return (
                     <tr key={worker.id}>
@@ -340,6 +329,67 @@ export function NodesPage() {
           </div>
         )}
       </section>
+
+      {stale.length > 0 && (
+        <details className="panel">
+          <summary className="panel-head">
+            <h2 className="panel-title">Раньше регистрировались, сейчас не в сети</h2>
+            <span className="muted num">{stale.length}</span>
+          </summary>
+          <p className="notice-text">
+            Это прошлые запуски программы. Они не подключены, и их видеокарты в сеть не входят.
+          </p>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Компьютер</th>
+                  <th>Последний heartbeat</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {stale.map((worker) => {
+                  const busy = pending === worker.id;
+                  return (
+                    <tr key={worker.id}>
+                      <td>
+                        <div>{worker.name}</div>
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          {worker.hostname}
+                        </div>
+                      </td>
+                      <td className="secondary">{formatSince(worker.last_heartbeat_at ?? worker.last_seen_at)}</td>
+                      <td>
+                        {confirmDelete === worker.id ? (
+                          <div className="row-actions">
+                            <button className="button" disabled={busy} onClick={() => void remove(worker)}>
+                              Удалить
+                            </button>
+                            <button className="button" data-variant="quiet" onClick={() => setConfirmDelete(null)}>
+                              Отмена
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="button"
+                            data-variant="quiet"
+                            title="Удалить регистрацию"
+                            disabled={busy}
+                            onClick={() => setConfirmDelete(worker.id)}
+                          >
+                            <IconTrash />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       <ConnectNodePanel onEnrolled={() => void load()} />
     </>

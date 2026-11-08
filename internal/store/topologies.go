@@ -11,16 +11,22 @@ import (
 
 // Topology — версия размещения ревизии по узлам.
 type Topology struct {
-	ID            string     `json:"id"`
-	RevisionID    string     `json:"revision_id"`
-	ModelName     string     `json:"model_name,omitempty"`
-	Version       int        `json:"version"`
-	Status        string     `json:"status"`
-	CoordinatorID *string    `json:"coordinator_worker_id,omitempty"`
-	SplitMode     string     `json:"split_mode"`
-	CreatedAt     time.Time  `json:"created_at"`
-	ActivatedAt   *time.Time `json:"activated_at,omitempty"`
-	TotalLayers   int        `json:"total_layers"`
+	ID            string  `json:"id"`
+	RevisionID    string  `json:"revision_id"`
+	ModelName     string  `json:"model_name,omitempty"`
+	Version       int     `json:"version"`
+	Status        string  `json:"status"`
+	CoordinatorID *string `json:"coordinator_worker_id,omitempty"`
+	SplitMode     string  `json:"split_mode"`
+	// Auto — группу собрала платформа. В такой группе ведущий — компьютер
+	// владельца чата, чужие машины только держат слои. Ручная группа этого
+	// свойства не имеет.
+	Auto bool `json:"auto,omitempty"`
+	// Error — почему группа не может подняться. Пусто у рабочей группы.
+	Error       string     `json:"error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ActivatedAt *time.Time `json:"activated_at,omitempty"`
+	TotalLayers int        `json:"total_layers"`
 }
 
 // Stage — один узел в топологии со своим диапазоном слоёв.
@@ -80,10 +86,10 @@ func (s *Store) CreateTopology(ctx context.Context, revisionID, coordinatorID, s
 		INSERT INTO topologies (revision_id, version, coordinator_worker_id, split_mode)
 		VALUES ($1::uuid, $2, NULLIF($3, '')::uuid, $4)
 		RETURNING id::text, revision_id::text, version, status, coordinator_worker_id::text,
-		          split_mode, created_at, activated_at`
+		          split_mode, error, created_at, activated_at`
 	if err := tx.QueryRow(ctx, insT, revisionID, nextVersion, coordinatorID, splitMode).Scan(
 		&t.ID, &t.RevisionID, &t.Version, &t.Status, &t.CoordinatorID, &t.SplitMode,
-		&t.CreatedAt, &t.ActivatedAt); err != nil {
+		&t.Error, &t.CreatedAt, &t.ActivatedAt); err != nil {
 		return TopologyDetail{}, fmt.Errorf("store: insert topology: %w", err)
 	}
 
@@ -157,7 +163,7 @@ func (s *Store) SetTopologyStatus(ctx context.Context, topologyID, status string
 func (s *Store) TopologyByID(ctx context.Context, topologyID string) (TopologyDetail, error) {
 	const tQ = `
 		SELECT t.id::text, t.revision_id::text, m.name, t.version, t.status,
-		       t.coordinator_worker_id::text, t.split_mode, t.created_at, t.activated_at
+		       t.coordinator_worker_id::text, t.split_mode, t.auto, t.error, t.created_at, t.activated_at
 		FROM topologies t
 		JOIN model_revisions r ON r.id = t.revision_id
 		JOIN model_catalog m ON m.id = r.model_id
@@ -167,7 +173,8 @@ func (s *Store) TopologyByID(ctx context.Context, topologyID string) (TopologyDe
 	err := s.pool.QueryRow(ctx, tQ, topologyID).Scan(
 		&detail.Topology.ID, &detail.Topology.RevisionID, &detail.Topology.ModelName,
 		&detail.Topology.Version, &detail.Topology.Status, &detail.Topology.CoordinatorID,
-		&detail.Topology.SplitMode, &detail.Topology.CreatedAt, &detail.Topology.ActivatedAt)
+		&detail.Topology.SplitMode, &detail.Topology.Auto, &detail.Topology.Error,
+		&detail.Topology.CreatedAt, &detail.Topology.ActivatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TopologyDetail{}, ErrNotFound
 	}

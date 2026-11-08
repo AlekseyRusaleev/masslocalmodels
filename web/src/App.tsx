@@ -37,7 +37,7 @@ const navItems: NavItem[] = [
   { id: "mine", label: "Мой узел", icon: <IconNodes /> },
   { id: "download", label: "Программа", icon: <IconModels /> },
   { id: "knowledge", label: "Знания", icon: <IconBook /> },
-  { id: "nodes", label: "Узлы", icon: <IconNodes />, adminOnly: true },
+  { id: "nodes", label: "Участники", icon: <IconNodes />, adminOnly: true },
   { id: "models", label: "Модели", icon: <IconModels /> },
   { id: "topology", label: "Топология", icon: <IconLayers />, adminOnly: true },
   { id: "jobs", label: "Задания", icon: <IconTasks />, adminOnly: true },

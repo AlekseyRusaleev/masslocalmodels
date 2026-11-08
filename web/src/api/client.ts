@@ -5,8 +5,27 @@ const TOKEN_KEY = "cn.admin_token";
 
 export type WorkerState = "available" | "paused" | "drain" | "maintenance" | "quarantined" | "offline";
 
+/** Окно, в котором платформа ещё считает компьютер участником сети. */
+export const heartbeatFreshMs = 2 * 60 * 1000;
+
+export function isConnected(worker: { last_heartbeat_at?: string }, now = Date.now()): boolean {
+  if (!worker.last_heartbeat_at) return false;
+  const at = Date.parse(worker.last_heartbeat_at);
+  return Number.isFinite(at) && now - at <= heartbeatFreshMs;
+}
+
+export function participantCounts(workers: Pick<WorkerRow, "id" | "owner_user_id" | "last_heartbeat_at">[]): {
+  total: number;
+  online: number;
+} {
+  const owner = (worker: { id: string; owner_user_id?: string }) => worker.owner_user_id || worker.id;
+  const onlineOwners = new Set(workers.filter((worker) => isConnected(worker)).map(owner));
+  return { total: new Set(workers.map(owner)).size, online: onlineOwners.size };
+}
+
 export interface WorkerRow {
   id: string;
+  owner_user_id?: string;
   name: string;
   state: WorkerState;
   trust_class: string;
@@ -511,6 +530,8 @@ export interface TopologyRow {
   status: string;
   coordinator_worker_id?: string;
   split_mode: string;
+  /** Почему группа не может подняться: не хватает памяти или узлов. */
+  error?: string;
   created_at: string;
   activated_at?: string;
   total_layers: number;

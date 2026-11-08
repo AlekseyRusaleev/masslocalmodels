@@ -78,6 +78,9 @@ type HeartbeatResponse struct {
 	ServerTime   string      `json:"server_time"`
 	IntervalSecs int         `json:"heartbeat_interval_seconds"`
 	Weights      *WeightPlan `json:"weights,omitempty"`
+	// MeshFit — причина, по которой группа слоёв не может подняться:
+	// не хватает памяти или узлов. Пусто — отказов нет.
+	MeshFit string `json:"mesh_fit,omitempty"`
 }
 
 // Capabilities собирает пакет возможностей из обнаруженной системы.

@@ -153,8 +153,9 @@ func TestResolveMeshFromTopology(t *testing.T) {
 	}
 }
 
-// Оценка памяти: половина весов плюс два гигабайта, но не меньше трёх.
-// Порог между двумя наблюдёнными точками (1.1 ГБ — падение, 6 ГБ — успех).
+// Оценка памяти: половина весов плюс два гигабайта, но не меньше трёх
+// и не больше наблюдённых 6 ГБ. Большой файл не должен требовать 8 ГБ
+// свободных на машине с 16 ГБ.
 func TestMeshMemoryNeed(t *testing.T) {
 	fiveGB := uint64(5) << 30
 	if got, want := meshMemoryNeed(fiveGB), uint64(4.5*(1<<30)); got != want {
@@ -162,6 +163,9 @@ func TestMeshMemoryNeed(t *testing.T) {
 	}
 	if got, want := meshMemoryNeed(1<<20), uint64(3)<<30; got != want {
 		t.Fatalf("tiny weights: got %d, want %d", got, want)
+	}
+	if got, want := meshMemoryNeed(uint64(13)<<30), uint64(6)<<30; got != want {
+		t.Fatalf("13 GiB weights: got %d, want 6 GiB", got)
 	}
 }
 
@@ -224,4 +228,52 @@ func TestMeshLogPathIsNamed(t *testing.T) {
 	if !strings.HasSuffix(path, "compute-mesh-coordinator.log") {
 		t.Fatalf("path = %q, want суффикс compute-mesh-coordinator.log", path)
 	}
+}
+
+// Чужая группа, где этот компьютер только стадия, не должна перехватывать
+// его собственный чат, даже если платформа прислала её первой.
+func TestChooseMeshPlansKeepsOwnChatOnThisComputer(t *testing.T) {
+	primary, stages := chooseMeshPlans([]ResolvedMesh{
+		{Role: meshRoleCompute, TopologyID: "foreign", CoordinatorID: "other"},
+		{Role: meshRoleCoordinator, TopologyID: "own", CoordinatorID: "self"},
+		{Role: meshRoleCompute, TopologyID: "third", CoordinatorID: "third"},
+	})
+	if primary.TopologyID != "own" || primary.Role != meshRoleCoordinator {
+		t.Fatalf("свой план = %+v", primary)
+	}
+	if len(stages) != 2 || stages[0].TopologyID != "foreign" || stages[1].TopologyID != "third" {
+		t.Fatalf("чужие стадии = %+v", stages)
+	}
+}
+
+// Ведущий не должен фиксировать все слои на GPU: llama.cpp тогда не ужимает
+// раскладку под карты группы, и файл больше одной карты не стартует.
+func TestCoordinatorServerArgsLetsLlamaFitTheCards(t *testing.T) {
+	args := coordinatorServerArgs(workercfg.Mesh{
+		GGUFPath:   `C:\model.gguf`,
+		Ctx:        16384,
+		ServerPort: 18081,
+	}, []string{"127.0.0.1:52534", "127.0.0.1:52535"})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "-ngl") || strings.Contains(joined, "--gpu-layers") || strings.Contains(joined, "--n-gpu-layers") {
+		t.Fatalf("нельзя задавать ngl, иначе --fit не работает: %v", args)
+	}
+	if !containsPair(args, "--fit", "on") {
+		t.Fatalf("нет --fit on: %v", args)
+	}
+	if !containsPair(args, "--fit-ctx", "16384") {
+		t.Fatalf("нет --fit-ctx 16384: %v", args)
+	}
+	if !containsPair(args, "--rpc", "127.0.0.1:52534,127.0.0.1:52535") {
+		t.Fatalf("нет --rpc: %v", args)
+	}
+}
+
+func containsPair(args []string, flag, value string) bool {
+	for index := 0; index < len(args)-1; index++ {
+		if args[index] == flag && args[index+1] == value {
+			return true
+		}
+	}
+	return false
 }

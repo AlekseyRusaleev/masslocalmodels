@@ -39,6 +39,9 @@ func prepareAutomaticMesh(cfg workercfg.Config) workercfg.Config {
 // Сначала явный путь, потом каталог, куда программа ставит сборку сама,
 // и только затем старая ручная установка.
 func findLlamaDir() string {
+	if dir := officialLlamaDir(); dir != "" {
+		return dir
+	}
 	if dir := strings.TrimSpace(os.Getenv("COMPUTE_LLAMA_DIR")); dir != "" {
 		if found := locateLlamaDir(dir); found != "" {
 			return found

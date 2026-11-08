@@ -28,6 +28,19 @@ func TestCanonicalManifestIsStable(t *testing.T) {
 	}
 }
 
+func TestArtifactsCompleteRequiresFullHash(t *testing.T) {
+	full := strings.Repeat("ab", 32)
+	if !ArtifactsComplete([]Artifact{{Name: "model.gguf", SHA256: "sha256:" + full, Size: 1}}) {
+		t.Fatal("полный sha256 с префиксом должен приниматься")
+	}
+	if ArtifactsComplete(nil) {
+		t.Fatal("ревизия без файлов не подписывается")
+	}
+	if ArtifactsComplete([]Artifact{{Name: "model.gguf", SHA256: "abcd", Size: 1}}) {
+		t.Fatal("короткий хэш не должен проходить")
+	}
+}
+
 // Любое изменение хэша файла ломает подпись — ради этого она и нужна.
 func TestManifestSignatureCatchesTampering(t *testing.T) {
 	pepper := []byte("pepper-for-tests")

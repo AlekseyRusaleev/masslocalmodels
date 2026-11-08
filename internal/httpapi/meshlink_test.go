@@ -82,6 +82,43 @@ func TestMeshStreamOverflow(t *testing.T) {
 	}
 }
 
+// Байты закончившегося сеанса не должны попасть в следующий: RPC примет их
+// за ответ сервера и оборвёт загрузку.
+func TestMeshStreamDropsBytesAfterBothSidesLeave(t *testing.T) {
+	stream := newMeshStream()
+	stream.joinUp()
+	if err := stream.write([]byte("stale")); err != nil {
+		t.Fatalf("write stale: %v", err)
+	}
+	stream.leaveUp()
+
+	stream.joinUp()
+	if err := stream.write([]byte("fresh")); err != nil {
+		t.Fatalf("write fresh: %v", err)
+	}
+	stream.joinDown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var got bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stream.readTo(ctx, &got, nil)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && got.Len() < len("fresh") {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	if got.String() != "fresh" {
+		t.Fatalf("получено %q, ожидалось fresh", got.String())
+	}
+}
+
 // writerFunc превращает функцию в io.Writer (в тесте свой, чтобы не зависеть
 // от внутренних деталей обработчика).
 type writerFunc func(p []byte) (int, error)

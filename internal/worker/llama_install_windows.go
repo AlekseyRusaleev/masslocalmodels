@@ -36,7 +36,7 @@ func installLlama(ctx context.Context, opts EnsureLlamaOptions) (string, error) 
 		}
 	}
 
-	dest := llamaInstallDir()
+	dest := llamaReleaseDir()
 	if dest == "" {
 		return "", fmt.Errorf("нет каталога для llama.cpp")
 	}
@@ -70,11 +70,15 @@ func installLlama(ctx context.Context, opts EnsureLlamaOptions) (string, error) 
 			return "", fmt.Errorf("не скачан CUDA-рантайм llama.cpp: %w", err)
 		}
 	}
-	if !llamaRuntimeReady(dest) {
+	dir := locateLlamaDir(dest)
+	if dir == "" || !llamaRuntimeReady(dir) {
 		return "", fmt.Errorf("в архиве llama.cpp нет llama-server, ggml-rpc-server или CUDA")
 	}
-	logf("llama.cpp установлена: %s", dest)
-	return dest, nil
+	if err := writeLlamaRelease(dir); err != nil {
+		return "", err
+	}
+	logf("llama.cpp %s установлена: %s", llamaRelease, dir)
+	return dir, nil
 }
 
 func fetchAndExtract(ctx context.Context, url, sha, dest string, progress func(done, total int64)) error {

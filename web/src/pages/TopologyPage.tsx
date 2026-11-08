@@ -151,6 +151,12 @@ export function TopologyPage() {
                             <span className="state-dot" />
                             {statusLabels[topology.status] ?? topology.status}
                           </span>
+                          {/* Почему группа не поднялась: числа, а не «ошибка карты». */}
+                          {topology.error && (
+                            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                              {topology.error}
+                            </div>
+                          )}
                         </td>
                         <td className="num">
                           <button
