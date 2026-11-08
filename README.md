@@ -8,7 +8,7 @@
 
 **The result that counts.** The client receives the text. The record of that answer has three numbers: tokens per second, seconds until the first token, and the share of draft tokens that were accepted.
 
-**Recorded so far.** One card, the whole model: 67.5 tok/s. Two stages on one machine: 12.1 tok/s (250 tokens in 20.7 s). Two homes on 7 November 2026: the client received 0 tokens; each of the three modes stopped after 660 s. The link between those homes carried 1.4 MB/s.
+**Recorded so far.** One card, the whole model: 67.5 tok/s. Two stages on one machine: 12.1 tok/s (250 tokens in 20.7 s).
 
 A model is split by layers: each computer computes one continuous range. The model file stays whole on every participant's disk. The principles, the two ways a request is answered, and the technologies behind them are in [`docs/how-it-works.en.md`](docs/how-it-works.en.md). The same path is shorter below.
 
