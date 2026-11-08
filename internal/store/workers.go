@@ -427,15 +427,29 @@ func (s *Store) RecordHeartbeat(ctx context.Context, hb Heartbeat) error {
 		}
 	}
 
+	// Версия программы участника обновляется вместе с heartbeat, иначе
+	// платформа навсегда показывает версию, с которой узел регистрировался,
+	// и по ней нельзя понять, кто уже обновился после публикации.
+	agentVersion := ""
+	if raw, ok := meta["agent_version"]; ok {
+		if value, ok := raw.(string); ok {
+			agentVersion = strings.TrimSpace(value)
+			if len(agentVersion) > 40 {
+				agentVersion = agentVersion[:40]
+			}
+		}
+	}
+
 	const touch = `UPDATE worker_nodes SET last_seen_at = now(),
 		rtt_ms = COALESCE($2, rtt_ms),
 		served_model = $3,
 		num_ctx = $4,
 		served_embedding_model = $5,
 		mesh_rpc_addr = $6,
+		agent_version = COALESCE(NULLIF($7, ''), agent_version),
 		link_measured_at = CASE WHEN $2 IS NULL THEN link_measured_at ELSE now() END
 		WHERE id = $1::uuid AND (state NOT IN ('maintenance', 'quarantined'))`
-	if _, err := tx.Exec(ctx, touch, hb.WorkerID, rtt, servedModel, numCtx, embeddingModel, meshRPCAddr); err != nil {
+	if _, err := tx.Exec(ctx, touch, hb.WorkerID, rtt, servedModel, numCtx, embeddingModel, meshRPCAddr, agentVersion); err != nil {
 		return fmt.Errorf("store: touch worker: %w", err)
 	}
 

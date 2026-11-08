@@ -36,7 +36,7 @@
 | Плоскость управления (Go, PostgreSQL) | работает; автоматическая раскладка слоёв после heartbeat |
 | API `/v1/chat/completions` | работает. Задание `private` забирает только узел того же владельца |
 | Панель (React) | работает: чат, узлы, модели, задания, топология |
-| Программа участника | 0.3.20 в коде. Windows: один exe с окном. Linux: те же действия командами, описание в [`linux.md`](linux.md) |
+| Программа участника | 0.3.22 в релизном фиде (`/node/release.json`, Windows; `release-linux.json` для Linux). Windows: один exe с окном. Linux: те же действия командами, описание в [`linux.md`](linux.md) |
 | Модель, которую платформа режет | **qwen2.5:72b-instruct-q4_0**, 80 слоёв. Файл на диске остаётся целым у каждого |
 | Группа слоёв | llama.cpp RPC. Два и больше узлов с файлом и llama.cpp получают непрерывные диапазоны **по объёму карт**, не поровну. Ведущий запускает llama-server с `--fit`, без `-ngl 99`. Узел с `model_fits` в группу не входит. Стадия на чат не отвечает. Модель, которая не влезает на карту, при сбое группы не грузится целиком через Ollama |
 | Черновик ngram-mod | флаг стоит на `llama-server`, который собирает ответ. 2026-11-07 сравнение группы с черновиком и без него не запускалось: на этом компьютере не работали `llama-server` и `ggml-rpc-server`, живой группы не было. tok/s, время до первого токена и доля принятых черновиков не записаны |
@@ -297,7 +297,7 @@ tok/s нет. Строки `draft acceptance rate` в журнале llama.cpp �
 **Причина доходит и до участника.** Плоскость управления отдаёт её в ответе
 heartbeat (`mesh_fit`), программа пишет в свой журнал одну строку при изменении
 причины и показывает её в окне: «группа слоёв не поднимается: …». Проверено на
-живом узле (сборка 0.3.21, локальная, в релизный фид не выложена):
+живом узле, сборка взята из релизного фида:
 
 ```
 WARN shard group cannot start reason="модель qwen2.5:72b-instruct-q4_0 не
@@ -305,8 +305,11 @@ WARN shard group cannot start reason="модель qwen2.5:72b-instruct-q4_0 н�
 нужно 38.4 ГиБ, есть 27.4 ГиБ"
 ```
 
-Открытым остаётся публикация 0.3.21 в релизный фид: сейчас фид отдаёт 0.3.20,
-поэтому остальные участники получат эту строку только после выкладки сборки.
+**Версия программы видна платформе.** До 0.3.22 `agent_version` записывался
+только при регистрации, поэтому панель показывала версию, с которой участник
+когда-то подключился (на живой сети: 0.2.6 у узла, который уже работал на
+0.3.20). Теперь версия приходит в каждом heartbeat и обновляется в
+`worker_nodes`: после выкладки 0.3.22 все три живых узла показывают `0.3.22`.
 
 ---
 
@@ -384,8 +387,30 @@ MODEL=Qwen/Qwen3-0.6B SPLIT=14 TOKENS=24 bash tools/wsl_run_pipeline.sh
 ```
 
 Полезные скрипты: `tools/vps-deploy-gateway.sh` (выкладка Control Plane),
-`tools/vps-last-jobs.sh`, `tools/vps-mesh-state.sh`, `tools/vps-traffic.sh`,
-`tools/vps-tunnel-cleanup.sh`.
+`tools/vps-publish-node.sh` (публикация программы участника в релизный фид),
+`tools/vps-nodes.sh` (кто в сети и на какой версии), `tools/vps-last-jobs.sh`,
+`tools/vps-mesh-state.sh`, `tools/vps-traffic.sh`, `tools/vps-tunnel-cleanup.sh`.
+
+### Как выложить новую версию программы участника
+
+```bash
+# 1. поднять AgentVersion в internal/worker/agent.go
+# 2. собрать Windows (с окном, GUI-подсистема) и Linux
+go build -trimpath -ldflags "-s -w -H=windowsgui" -o bin/rel/compute-node.exe ./cmd/worker
+GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/rel/compute-node-linux ./cmd/worker
+# 3. залить оба файла на VPS в /tmp как compute-node.exe.new и compute-node-linux.new
+scp bin/rel/compute-node.exe root@<vps>:/tmp/compute-node.exe.new
+scp bin/rel/compute-node-linux root@<vps>:/tmp/compute-node-linux.new
+# 4. опубликовать: скрипт сам считает хеши, кладёт файлы и пишет оба фида
+ssh root@<vps> "VERSION=0.3.22 bash /tmp/vps-publish-node.sh"
+```
+
+Скрипт сначала кладёт копии с номером версии, потом файлы без номера и только
+затем — `release.json` / `release-linux.json` через временный файл, поэтому
+участник никогда не скачает половину обновления. В конце он проверяет фид по
+`https://` и сверяет хеш скачанного файла. Windows-узел обновляется кнопкой в
+окне, Linux-служба — сама. Зацикливания нет: опубликованная версия равна
+установленной, и `NewerVersion` возвращает false.
 
 ---
 
