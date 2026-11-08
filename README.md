@@ -2,15 +2,15 @@
 
 [Русский](README.ru.md)
 
-One home cannot load and run a large model. You connect to the network, the model is split among the participants, each one contributes their own computing power, and that is how you get the ability to run it.
+A large model does not fit on the graphics card of an ordinary home computer, so one person cannot load it or run it. In this network several such computers work together. The model is split among the participants by layers: each one contributes the power of their graphics card and space on disk, and in return can use a model that one computer cannot hold.
+
+The chat stays with the person who sent it. That person's computer leads the answer and sees the text; the others only compute their share of the layers. A chat program talks to one OpenAI-compatible address and has no need to know which computers replied.
 
 **Client:** [Windows](https://api.nshno.tech/node/compute-node.exe) · [Linux](https://api.nshno.tech/node/compute-node-linux)
 
-**The result that counts.** The client receives the text. The record of that answer has three numbers: tokens per second, seconds until the first token, and the share of draft tokens that were accepted.
+The answer is done when the client has received the text. That answer has three numbers: tokens per second, seconds until the first token, and the share of draft tokens that were accepted. Already measured: one graphics card running the whole model gives 67.5 tok/s; two stages on one machine give 12.1 tok/s (250 tokens in 20.7 s).
 
-**Recorded so far.** One card, the whole model: 67.5 tok/s. Two stages on one machine: 12.1 tok/s (250 tokens in 20.7 s).
-
-A model is split by layers: each computer computes one continuous range. The model file stays whole on every participant's disk. The principles, the two ways a request is answered, and the technologies behind them are in [`docs/how-it-works.en.md`](docs/how-it-works.en.md). The same path is shorter below.
+The model file stays whole on every participant's disk. Each computer computes its own continuous range of layers. The principles and the two ways a request is answered are in [`docs/how-it-works.en.md`](docs/how-it-works.en.md). The same path is shorter below.
 
 ## How a request moves
 
